@@ -1,0 +1,123 @@
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+}
+
+enum UserRole {
+  ENCARGADO
+  AYUDANTE
+}
+
+enum ClassroomType {
+  LAB_COMPUTACION
+  LAB_GENERAL
+  AULA
+}
+
+enum ScheduleType {
+  CLASE
+  ACTIVIDAD
+  MANTENIMIENTO
+}
+
+enum MaintenanceStatus {
+  REPORTADO
+  EN_PROGRESO
+  COMPLETADO
+}
+
+model User {
+  id           String          @id @default(cuid())
+  name         String
+  email        String          @unique
+  passwordHash String
+  role         UserRole        @default(AYUDANTE)
+  active       Boolean         @default(true)
+  createdAt    DateTime        @default(now())
+  updatedAt    DateTime        @updatedAt
+  schedules    Schedule[]
+  annotations  Annotation[]
+  maintenance  MaintenanceLog[]
+}
+
+model Classroom {
+  id          String          @id @default(cuid())
+  code        String          @unique
+  name        String
+  type        ClassroomType
+  capacity    Int?
+  location    String?
+  active      Boolean         @default(true)
+  createdAt   DateTime        @default(now())
+  updatedAt   DateTime        @updatedAt
+  schedules   Schedule[]
+  annotations Annotation[]
+  maintenance MaintenanceLog[]
+}
+
+model TimeSlot {
+  id        String     @id @default(cuid())
+  label     String
+  startTime String
+  endTime   String
+  order     Int        @unique
+  schedules Schedule[]
+}
+
+model Semester {
+  id        String     @id @default(cuid())
+  name      String
+  startDate DateTime
+  endDate   DateTime
+  isActive  Boolean    @default(false)
+  schedules Schedule[]
+}
+
+model Schedule {
+  id           String       @id @default(cuid())
+  classroomId  String
+  semesterId   String
+  dayOfWeek    Int
+  timeSlotId   String
+  type         ScheduleType @default(CLASE)
+  title        String
+  teacher      String?
+  note         String?
+  assignedById String
+  createdAt    DateTime     @default(now())
+  updatedAt    DateTime     @updatedAt
+
+  classroom  Classroom @relation(fields: [classroomId], references: [id], onDelete: Cascade)
+  semester   Semester  @relation(fields: [semesterId], references: [id], onDelete: Cascade)
+  timeSlot   TimeSlot  @relation(fields: [timeSlotId], references: [id])
+  assignedBy User      @relation(fields: [assignedById], references: [id])
+
+  @@unique([classroomId, semesterId, dayOfWeek, timeSlotId])
+  @@index([classroomId, semesterId])
+}
+
+model Annotation {
+  id          String    @id @default(cuid())
+  classroomId String
+  userId      String
+  date        DateTime  @default(now())
+  content     String
+  classroom   Classroom @relation(fields: [classroomId], references: [id], onDelete: Cascade)
+  user        User      @relation(fields: [userId], references: [id])
+}
+
+model MaintenanceLog {
+  id          String            @id @default(cuid())
+  classroomId String
+  date        DateTime
+  reason      String
+  status      MaintenanceStatus @default(REPORTADO)
+  createdById String
+  createdAt   DateTime          @default(now())
+  classroom   Classroom         @relation(fields: [classroomId], references: [id], onDelete: Cascade)
+  createdBy   User              @relation(fields: [createdById], references: [id])
+}
