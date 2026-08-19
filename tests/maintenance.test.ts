@@ -1,5 +1,5 @@
 import { describe, it, expect, beforeAll, afterAll } from "vitest";
-import { testRequest, loginAsAdmin, loginAsHelper, createTestClassroom, authHeader } from "./helpers";
+import { testRequest, loginAsAdmin, loginAsHelper, createTestClassroom, cleanupTestUsers } from "./helpers";
 import { prisma } from "../src/lib/prisma";
 
 describe("Maintenance", () => {
@@ -20,6 +20,7 @@ describe("Maintenance", () => {
   afterAll(async () => {
     await prisma.maintenanceLog.deleteMany({ where: { classroomId: testClassroomId } }).catch(() => {});
     await prisma.classroom.delete({ where: { id: testClassroomId } }).catch(() => {});
+    await cleanupTestUsers();
   });
 
   it("GET /maintenance - lista", async () => {

@@ -18,6 +18,7 @@ Este proyecto es la **API** que administra la base de datos. El frontend (`labma
 | BD | PostgreSQL en **Neon** (serverless) |
 | Auth | JWT (`jsonwebtoken`, expiración 12h) + `bcryptjs` (salt 12) |
 | Validación | Zod 4 (en el límite de la API) |
+| Seguridad | Helmet · CORS · rate limiting en login (`express-rate-limit`) · body limit 1 MB |
 | Testing | Vitest + Supertest |
 
 ## Arquitectura
@@ -47,13 +48,14 @@ labmanage-api/
 │   ├── config/env.ts        # Variables de entorno tipadas (valida que existan)
 │   ├── lib/prisma.ts        # Instancia única de PrismaClient
 │   ├── middleware/
-│   │   ├── auth.ts          # requireAuth, requireRole, optionalAuth (adjunta req.user)
+│   │   ├── auth.ts          # requireAuth, requireRole (adjunta req.user)
 │   │   ├── validate.ts      # Validación Zod genérica (body | query | params)
+│   │   ├── rateLimit.ts     # Rate limiter de login (factory testeable)
 │   │   └── errorHandler.ts  # Traduce Zod y errores Prisma al formato { error }
 │   ├── routes/              # Definen endpoints, middlewares y validación Zod
 │   ├── services/            # Lógica de negocio (permisos, conflictos, transacciones)
 │   ├── types/index.ts       # Tipos de respuesta compartidos (fuente de verdad)
-│   └── utils/errors.ts      # ApiError + catálogo de errores (ApiErrors)
+│   └── utils/               # errors.ts (ApiError) · serializers.ts (toPublicUser)
 └── tests/                   # Suites de test por recurso
 ```
 
@@ -192,7 +194,7 @@ Esquema completo en `prisma/schema.prisma`. Seis modelos:
 \* `POST /api/schedules` con `type=MANTENIMIENTO` exige rol `ENCARGADO`; un ayudante recibe `403`.
 \*\* Un ayudante solo puede editar/eliminar schedules **propios** que no sean `MANTENIMIENTO`.
 
-> **Nota de implementación**: `optionalAuth` existe en `src/middleware/auth.ts` pero **no se usa en ninguna ruta** actual; todas las rutas usan `requireAuth` o `requireRole`.
+> **Rate limiting**: `POST /api/auth/login` está limitado a **20 intentos por IP cada 15 minutos** (configurable vía `createLoginLimiter` en `src/middleware/rateLimit.ts`). Al superarse responde `429 RATE_LIMIT_EXCEEDED`. Durante los tests (`NODE_ENV=test`) el límite se eleva para no interferir con la suite.
 
 ---
 
@@ -204,6 +206,7 @@ Esquema completo en `prisma/schema.prisma`. Seis modelos:
 - **Auth**: `Authorization: Bearer <token>`.
 - **Respuestas de listas**: siempre en un objeto contenedor (`{ users: [...] }`, `{ classrooms: [...] }`, `{ timeSlots: [...] }`, `{ semesters: [...] }`, `{ schedules: [...] }`, `{ annotations: [...] }`, `{ maintenance: [...] }`). Nunca arrays desnudos.
 - **Respuestas individuales**: `{ user }`, `{ classroom }`, `{ semester }`, `{ schedule }`, `{ annotation }`, `{ maintenance }`.
+- **Eliminaciones (DELETE)**: siempre `{ ok: true }` en 200, para todos los recursos.
 - **Búsquedas GET**: filtros opcionales por query string. `?includeInactive=true` solo tiene efecto para rol `ENCARGADO` (el ayudante siempre ve solo activos).
 - **Fechas**: serializadas en **ISO 8601** (UTC). `dayOfWeek`: 1=Lunes … 6=Sábado. Horas: `HH:mm`.
 - **IDs**: strings opacas (cuid o ids legibles del seed). Los clientes nunca deben parsear su formato.
@@ -224,7 +227,9 @@ Esquema completo en `prisma/schema.prisma`. Seis modelos:
 | `RESERVATION_CONFLICT` | 409 | Celda ya ocupada (violación del `@@unique`, `P2002`) |
 | `EMAIL_IN_USE` | 409 | Email duplicado en usuarios (`P2002`) |
 | `CLASSROOM_CODE_IN_USE` | 409 | Código de aula duplicado (`P2002`) |
+| `CONFLICT` | 409 | Otra violación de unicidad `P2002` no clasificada |
 | `NO_ACTIVE_SEMESTER` | 409 | `POST /schedules` cuando **no existe ningún** semestre activo |
+| `RATE_LIMIT_EXCEEDED` | 429 | Supera el límite de intentos de `POST /auth/login` |
 | `INTERNAL_ERROR` | 500 | Error no controlado (mensaje genérico, sin stack) |
 
 Formato de respuesta de error (uniforme):
@@ -276,9 +281,9 @@ interface AuthResponse { token: string; user: User; }
 
 #### Autenticación
 
-**`POST /api/auth/login`** — Público
+**`POST /api/auth/login`** — Público (rate limited)
 - Body: `{ email: email().max(254) → lowercased, password: string().min(1).max(100) }`
-- **200** `{ token, user }` · **400** `VALIDATION_ERROR` · **401** `AUTH_INVALID_CREDENTIALS` | `USER_INACTIVE`
+- **200** `{ token, user }` · **400** `VALIDATION_ERROR` · **401** `AUTH_INVALID_CREDENTIALS` | `USER_INACTIVE` · **429** `RATE_LIMIT_EXCEEDED` (20 intentos/15 min por IP)
 
 **`GET /api/auth/me`** — Autenticado
 - **200** `{ user }` · **401** `TOKEN_INVALID` | `TOKEN_EXPIRED`
@@ -298,7 +303,7 @@ interface AuthResponse { token: string; user: User; }
 
 **`DELETE /api/users/:id`** — soft delete (`active=false`)
 - No puede eliminar el usuario autenticado → **400** `CANNOT_DELETE_SELF`.
-- **200** `{ user }` (con `active:false`) · **400** `CANNOT_DELETE_SELF` · **404** `NOT_FOUND`
+- **200** `{ ok: true }` · **400** `CANNOT_DELETE_SELF` · **404** `NOT_FOUND`
 
 #### Aulas
 
@@ -315,7 +320,7 @@ interface AuthResponse { token: string; user: User; }
 - **200** `{ classroom }` · **400** `VALIDATION_ERROR` · **404** `NOT_FOUND` · **409** `CLASSROOM_CODE_IN_USE`
 
 **`DELETE /api/classrooms/:id`** — ENCARGADO, soft delete
-- **200** `{ classroom }` (con `active:false`) · **404** `NOT_FOUND`
+- **200** `{ ok: true }` · **404** `NOT_FOUND`
 
 #### Turnos
 
@@ -356,7 +361,7 @@ interface AuthResponse { token: string; user: User; }
 
 **`PATCH /api/schedules/:id`** — Autor del schedule o ENCARGADO
 - Body parcial: `{ classroomId?, semesterId?, dayOfWeek?, timeSlotId?, type?, title?, teacher?, note? }`.
-- Si cambia la celda (`classroomId`/`semesterId`/`dayOfWeek`/`timeSlotId`), revalida conflicto → **409** `RESERVATION_CONFLICT`.
+- Si cambia la celda (`classroomId`/`semesterId`/`dayOfWeek`/`timeSlotId`), valida que aula/semestre/turno existan (**404**) y revalida conflicto → **409** `RESERVATION_CONFLICT`.
 - Ayudante **no** puede: editar schedule ajeno (**403**), editar un `MANTENIMIENTO` (**403**) ni cambiarlo a `type=MANTENIMIENTO` (**403**).
 - **200** `{ schedule }` · **400** `VALIDATION_ERROR` · **404** `NOT_FOUND`
 
@@ -366,7 +371,7 @@ interface AuthResponse { token: string; user: User; }
 #### Anotaciones
 
 **`GET /api/annotations?classroomId=&from=&to=`** — Autenticado
-- `classroomId` requerido; `from`/`to` opcionales (ISO). Orden `date` desc.
+- `classroomId` requerido; `from`/`to` opcionales (ISO). `to` es **inclusivo**: incluye todo el día de la fecha indicada. Orden `date` desc.
 - **200** `{ annotations: Annotation[] }` · **400** `VALIDATION_ERROR` · **401**
 
 **`POST /api/annotations`** — Autenticado
@@ -399,7 +404,7 @@ interface AuthResponse { token: string; user: User; }
 **`GET /api/stats/overview`** — Autenticado
 - **200** `StatsOverview`:
   - `occupiedSlots` = schedules `CLASE`/`ACTIVIDAD` en el semestre activo (el `MANTENIMIENTO` no cuenta).
-  - `totalSlots` = **54** fijo (9 turnos × 6 días).
+  - `totalSlots` = **dinámico**: `count(timeSlot) × 6 días` (con el seed por defecto: 9 × 6 = 54).
   - `percentage` = redondeado a 2 decimales (0–100).
   - `pendingMaintenance` = `MaintenanceLog` con `status != "COMPLETADO"`.
   - Si no hay semestre activo, todos los `occupiedSlots`/`percentage` son 0.
@@ -427,8 +432,9 @@ Suite con **Vitest + Supertest** (`tests/`), ejecutable con `npm test`. Cubre:
 | `annotations.test.ts` | CRUD y permisos de autor |
 | `maintenance.test.ts` | creación por ayudante, cambio de estado/borrado solo encargado |
 | `stats.test.ts` | estructura de `StatsOverview` y ocupación |
+| `rate-limit.test.ts` | `429 RATE_LIMIT_EXCEEDED` al superar el límite del login |
 
-> Los tests usan la base real (`DATABASE_URL` del `.env`) y crean/limpian datos de prueba. **No corras `npm test` contra la base de producción.**
+> Los tests usan la base real (`DATABASE_URL` del `.env`) y crean/limpian datos de prueba (aulas, semestres, schedules, usuarios helper con `cleanupTestUsers`). **No corras `npm test` contra la base de producción.**
 
 ---
 
@@ -461,16 +467,15 @@ Comportamiento:
 
 ## Notas de implementación (comportamiento real)
 
-Diferencias/particularidades de la implementación actual frente a `PLAN.md`, documentadas para que el README sea una guía fiel:
+Particularidades de la implementación actual, documentadas para que el README sea una guía fiel:
 
 1. **`NO_ACTIVE_SEMESTER`** se lanza en `POST /schedules` solo cuando **no existe ningún** semestre activo. Se permite crear un schedule en un semestre **inactivo** si hay al menos un semestre activo (verificado por test). En `PATCH /schedules`, el chequeo solo corre si se cambia el `semesterId`.
-2. **`optionalAuth`** (`src/middleware/auth.ts`) está definido pero **no se usa en ninguna ruta**.
-3. **Zod 4**: se usa la sintaxis nueva `z.email()` (en lugar de `z.string().email()` de Zod 3).
-4. **Seed**: el `upsert` del admin re-hashea la contraseña en cada ejecución (ver sección de seed).
-5. **`percentage`** en `StatsOverview` se redondea a 2 decimales; **`totalSlots` = 54** fijo (hardcodeado, 9 turnos × 6 días).
-6. **`.env` actual** usa una URL **pooled** de Neon con `channel_binding=require`, aunque `PLAN.md` recomienda la conexión **directa** para Prisma. Verifica cuál te da mejor resultado con `npx prisma migrate dev`.
-7. **Borrado de ruta no encontrada**: `notFoundHandler` devuelve `404 NOT_FOUND` con mensaje "Ruta no encontrada" (mismo código que recurso inexistente).
-8. **Validación de `PATCH /classrooms/:id`**: no valida el `params.id` con Zod (a diferencia de otros `PATCH`/`DELETE`); el handler lo usa tal cual.
+2. **Zod 4**: se usa la sintaxis nueva `z.email()` (en lugar de `z.string().email()` de Zod 3).
+3. **Seed**: el `upsert` del admin re-hashea la contraseña en cada ejecución (ver sección de seed).
+4. **`.env` actual** usa una URL **pooled** de Neon con `channel_binding=require`, aunque `PLAN.md` recomienda la conexión **directa** para Prisma. Verifica cuál te da mejor resultado con `npx prisma migrate dev`.
+5. **Borrado de ruta no encontrada**: `notFoundHandler` devuelve `404 NOT_FOUND` con mensaje "Ruta no encontrada" (mismo código que recurso inexistente).
+6. **Login anti-enumeración**: cuando el email no existe se ejecuta igualmente `bcrypt.compare` contra un hash dummy, para que el tiempo de respuesta no revele si un email está registrado.
+7. **JWT**: el token solo lleva `sub` (id del usuario); el rol se lee siempre de la base de datos, así un cambio de rol no queda "congelado" en tokens ya emitidos.
 
 ---
 

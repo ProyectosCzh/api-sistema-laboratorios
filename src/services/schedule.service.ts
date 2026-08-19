@@ -86,16 +86,6 @@ export async function updateSchedule(
 
   const cellChanged = classroomId !== existing.classroomId || semesterId !== existing.semesterId || dayOfWeek !== existing.dayOfWeek || timeSlotId !== existing.timeSlotId;
   if (cellChanged) {
-    if (semesterId !== existing.semesterId) {
-      if (!(await hasActiveSemester())) throw ApiErrors.noActiveSemester();
-    }
-    const conflict = await prisma.schedule.findFirst({
-      where: { classroomId, semesterId, dayOfWeek, timeSlotId, NOT: { id } },
-    });
-    if (conflict) throw ApiErrors.reservationConflict();
-  }
-
-  if (data.type !== undefined) {
     const [classroom, semester, timeSlot] = await Promise.all([
       prisma.classroom.findUnique({ where: { id: classroomId } }),
       prisma.semester.findUnique({ where: { id: semesterId } }),
@@ -104,6 +94,14 @@ export async function updateSchedule(
     if (!classroom) throw ApiErrors.notFound("Aula no encontrada");
     if (!semester) throw ApiErrors.notFound("Semestre no encontrado");
     if (!timeSlot) throw ApiErrors.notFound("Turno no encontrado");
+
+    if (semesterId !== existing.semesterId) {
+      if (!(await hasActiveSemester())) throw ApiErrors.noActiveSemester();
+    }
+    const conflict = await prisma.schedule.findFirst({
+      where: { classroomId, semesterId, dayOfWeek, timeSlotId, NOT: { id } },
+    });
+    if (conflict) throw ApiErrors.reservationConflict();
   }
 
   const schedule = await prisma.schedule.update({

@@ -24,5 +24,7 @@ export const ApiErrors = {
   emailInUse: () => new ApiError(409, "EMAIL_IN_USE", "Ese email ya está registrado"),
   classroomCodeInUse: () => new ApiError(409, "CLASSROOM_CODE_IN_USE", "Ya existe un aula con ese código"),
   noActiveSemester: () => new ApiError(409, "NO_ACTIVE_SEMESTER", "No hay semestre activo para operar horarios"),
+  conflict: () => new ApiError(409, "CONFLICT", "Conflicto con un recurso existente"),
+  rateLimited: () => new ApiError(429, "RATE_LIMIT_EXCEEDED", "Demasiados intentos, intentá de nuevo más tarde"),
   internal: (message = "Ocurrió un error inesperado, intentá de nuevo") => new ApiError(500, "INTERNAL_ERROR", message),
 };

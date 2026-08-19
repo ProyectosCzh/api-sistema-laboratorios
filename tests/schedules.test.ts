@@ -1,5 +1,5 @@
 import { describe, it, expect, beforeAll, afterAll } from "vitest";
-import { testRequest, loginAsAdmin, loginAsHelper, createTestClassroom, createTestSemester, activateSemester, authHeader } from "./helpers";
+import { testRequest, loginAsAdmin, loginAsHelper, createTestClassroom, createTestSemester, activateSemester, cleanupTestUsers } from "./helpers";
 import { prisma } from "../src/lib/prisma";
 
 describe("Schedules", () => {
@@ -28,6 +28,7 @@ describe("Schedules", () => {
     await prisma.schedule.deleteMany({ where: { classroomId: testClassroomId, semesterId: testSemesterId } }).catch(() => {});
     await prisma.classroom.delete({ where: { id: testClassroomId } }).catch(() => {});
     await prisma.semester.delete({ where: { id: testSemesterId } }).catch(() => {});
+    await cleanupTestUsers();
   });
 
   it("GET /schedules - lista vacía inicialmente", async () => {
@@ -136,6 +137,19 @@ describe("Schedules", () => {
     } finally {
       await prisma.schedule.deleteMany({ where: { semesterId: inactive.id } }).catch(() => {});
       await prisma.semester.delete({ where: { id: inactive.id } }).catch(() => {});
+    }
+  });
+
+  it("PATCH /schedules/:id - referencia inexistente da 404", async () => {
+    const list = await testRequest().get(`/api/schedules?classroomId=${testClassroomId}&semesterId=${testSemesterId}`).set("Authorization", `Bearer ${adminToken}`);
+    const anySchedule = list.body.schedules[0];
+    if (anySchedule) {
+      const res = await testRequest()
+        .patch(`/api/schedules/${anySchedule.id}`)
+        .set("Authorization", `Bearer ${adminToken}`)
+        .send({ semesterId: "sem-inexistente" });
+      expect(res.status).toBe(404);
+      expect(res.body.error.code).toBe("NOT_FOUND");
     }
   });
 });

@@ -6,12 +6,16 @@ export async function listAnnotations(classroomId: string, from?: Date, to?: Dat
   const annotations = await prisma.annotation.findMany({
     where: {
       classroomId,
-      ...(from || to ? { date: { ...(from && { gte: from }), ...(to && { lte: to }) } } : {}),
+      ...(from || to ? { date: { ...(from && { gte: from }), ...(to && { lt: nextDay(to) }) } } : {}),
     },
     include: { user: { select: { id: true, name: true } } },
     orderBy: { date: "desc" },
   });
   return annotations.map(toAnnotation);
+}
+
+function nextDay(d: Date): Date {
+  return new Date(Date.UTC(d.getUTCFullYear(), d.getUTCMonth(), d.getUTCDate() + 1));
 }
 
 export async function createAnnotation(classroomId: string, content: string, userId: string): Promise<Annotation> {

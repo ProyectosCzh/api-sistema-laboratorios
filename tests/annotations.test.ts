@@ -1,5 +1,5 @@
 import { describe, it, expect, beforeAll, afterAll } from "vitest";
-import { testRequest, loginAsAdmin, loginAsHelper, createTestClassroom, authHeader } from "./helpers";
+import { testRequest, loginAsAdmin, loginAsHelper, createTestClassroom, cleanupTestUsers } from "./helpers";
 import { prisma } from "../src/lib/prisma";
 
 describe("Annotations", () => {
@@ -20,6 +20,7 @@ describe("Annotations", () => {
   afterAll(async () => {
     await prisma.annotation.deleteMany({ where: { classroomId: testClassroomId } }).catch(() => {});
     await prisma.classroom.delete({ where: { id: testClassroomId } }).catch(() => {});
+    await cleanupTestUsers();
   });
 
   it("GET /annotations - lista vacía", async () => {
@@ -60,5 +61,18 @@ describe("Annotations", () => {
       .delete(`/api/annotations/${create.body.annotation.id}`)
       .set("Authorization", `Bearer ${helperToken}`);
     expect(res.status).toBe(403);
+  });
+
+  it("GET /annotations - filtro to incluye el día completo", async () => {
+    const create = await testRequest()
+      .post("/api/annotations")
+      .set("Authorization", `Bearer ${helperToken}`)
+      .send({ classroomId: testClassroomId, content: "Anotación de hoy" });
+    const today = new Date().toISOString().split("T")[0];
+    const res = await testRequest()
+      .get(`/api/annotations?classroomId=${testClassroomId}&from=2000-01-01&to=${today}`)
+      .set("Authorization", `Bearer ${helperToken}`);
+    expect(res.status).toBe(200);
+    expect(res.body.annotations.some((a: any) => a.id === create.body.annotation.id)).toBe(true);
   });
 });

@@ -1,6 +1,7 @@
 import bcrypt from "bcryptjs";
 import { prisma } from "../lib/prisma";
 import { ApiErrors } from "../utils/errors";
+import { toPublicUser } from "../utils/serializers";
 import type { User } from "../types";
 
 export async function listUsers(): Promise<User[]> {
@@ -32,17 +33,7 @@ export async function updateUser(id: string, data: { name?: string; email?: stri
   return toPublicUser(user);
 }
 
-export async function deleteUser(id: string, currentUserId: string): Promise<User> {
+export async function deleteUser(id: string, currentUserId: string): Promise<void> {
   if (id === currentUserId) throw ApiErrors.cannotDeleteSelf();
-  const user = await prisma.user.update({ where: { id }, data: { active: false } });
-  return toPublicUser(user);
-}
-
-function toPublicUser(u: { id: string; name: string; email: string; role: "ENCARGADO" | "AYUDANTE"; active: boolean; createdAt: Date; updatedAt: Date; passwordHash: string }): User {
-  const { passwordHash, ...rest } = u;
-  return {
-    ...rest,
-    createdAt: rest.createdAt.toISOString(),
-    updatedAt: rest.updatedAt.toISOString(),
-  };
+  await prisma.user.update({ where: { id }, data: { active: false } });
 }

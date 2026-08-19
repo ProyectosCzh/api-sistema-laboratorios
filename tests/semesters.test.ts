@@ -1,5 +1,5 @@
 import { describe, it, expect, beforeAll, afterAll } from "vitest";
-import { testRequest, loginAsAdmin, createTestSemester, activateSemester, authHeader } from "./helpers";
+import { testRequest, loginAsAdmin, createTestSemester, activateSemester } from "./helpers";
 import { prisma } from "../src/lib/prisma";
 
 describe("Semesters", () => {

@@ -1,5 +1,4 @@
 import { prisma } from "../lib/prisma";
-import { ApiErrors } from "../utils/errors";
 import type { Classroom } from "../types";
 
 export async function listClassrooms(includeInactive: boolean): Promise<Classroom[]> {

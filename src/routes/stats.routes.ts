@@ -4,7 +4,7 @@ import * as statsService from "../services/stats.service";
 
 const router = Router();
 
-router.get("/overview", requireAuth, async (req, res, next) => {
+router.get("/overview", requireAuth, async (_req, res, next) => {
   try {
     const stats = await statsService.getOverview();
     res.status(200).json(stats);

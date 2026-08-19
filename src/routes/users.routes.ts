@@ -6,7 +6,7 @@ import * as userService from "../services/user.service";
 
 const router = Router();
 
-router.get("/", requireAuth, requireRole("ENCARGADO"), async (req, res, next) => {
+router.get("/", requireAuth, requireRole("ENCARGADO"), async (_req, res, next) => {
   try {
     const users = await userService.listUsers();
     res.status(200).json({ users });
@@ -50,8 +50,8 @@ router.patch("/:id", requireAuth, requireRole("ENCARGADO"), validate(updateUserS
 
 router.delete("/:id", requireAuth, requireRole("ENCARGADO"), validate(z.object({ id: z.string().min(1) }), "params"), async (req, res, next) => {
   try {
-    const user = await userService.deleteUser(req.params.id as string, req.user!.id);
-    res.status(200).json({ user });
+    await userService.deleteUser(req.params.id as string, req.user!.id);
+    res.status(200).json({ ok: true });
   } catch (e) {
     next(e);
   }

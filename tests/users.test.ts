@@ -1,10 +1,11 @@
 import { describe, it, expect, beforeAll, afterAll } from "vitest";
-import { testRequest, loginAsAdmin, authHeader } from "./helpers";
+import { testRequest, loginAsAdmin } from "./helpers";
 import { prisma } from "../src/lib/prisma";
 
 describe("Users (ENCARGADO)", () => {
   let adminToken: string;
   let createdUserId: string;
+  let dupUserId: string;
 
   beforeAll(async () => {
     const admin = await loginAsAdmin();
@@ -12,8 +13,8 @@ describe("Users (ENCARGADO)", () => {
   });
 
   afterAll(async () => {
-    if (createdUserId) {
-      await prisma.user.delete({ where: { id: createdUserId } }).catch(() => {});
+    for (const id of [createdUserId, dupUserId]) {
+      if (id) await prisma.user.delete({ where: { id } }).catch(() => {});
     }
   });
 
@@ -38,7 +39,8 @@ describe("Users (ENCARGADO)", () => {
 
   it("POST /users - email duplicado", async () => {
     const email = `dup-${Date.now()}@test.com`;
-    await testRequest().post("/api/users").set("Authorization", `Bearer ${adminToken}`).send({ name: "U1", email, password: "password123", role: "AYUDANTE" });
+    const first = await testRequest().post("/api/users").set("Authorization", `Bearer ${adminToken}`).send({ name: "U1", email, password: "password123", role: "AYUDANTE" });
+    dupUserId = first.body.user.id;
     const res = await testRequest().post("/api/users").set("Authorization", `Bearer ${adminToken}`).send({ name: "U2", email, password: "password123", role: "AYUDANTE" });
     expect(res.status).toBe(409);
     expect(res.body.error.code).toBe("EMAIL_IN_USE");
@@ -59,7 +61,11 @@ describe("Users (ENCARGADO)", () => {
       .delete(`/api/users/${createdUserId}`)
       .set("Authorization", `Bearer ${adminToken}`);
     expect(res.status).toBe(200);
-    expect(res.body.user.active).toBe(false);
+    expect(res.body.ok).toBe(true);
+
+    const list = await testRequest().get("/api/users").set("Authorization", `Bearer ${adminToken}`);
+    const deleted = list.body.users.find((u: any) => u.id === createdUserId);
+    expect(deleted.active).toBe(false);
   });
 
   it("DELETE /users/:id - no puede eliminarse a sí mismo", async () => {

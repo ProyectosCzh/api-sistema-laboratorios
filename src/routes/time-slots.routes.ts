@@ -4,7 +4,7 @@ import * as timeSlotService from "../services/timeSlot.service";
 
 const router = Router();
 
-router.get("/", requireAuth, async (req, res, next) => {
+router.get("/", requireAuth, async (_req, res, next) => {
   try {
     const timeSlots = await timeSlotService.listTimeSlots();
     res.status(200).json({ timeSlots });

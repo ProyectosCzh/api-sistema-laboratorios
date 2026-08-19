@@ -1,6 +1,5 @@
-import { describe, it, expect, beforeAll, afterAll } from "vitest";
-import { testRequest, loginAsAdmin, createTestClassroom, createTestSemester, activateSemester, authHeader } from "./helpers";
-import { prisma } from "../src/lib/prisma";
+import { describe, it, expect, beforeAll } from "vitest";
+import { testRequest, loginAsAdmin } from "./helpers";
 
 describe("Time Slots", () => {
   let adminToken: string;

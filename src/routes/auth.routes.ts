@@ -2,8 +2,8 @@ import { Router } from "express";
 import { z } from "zod";
 import { validate } from "../middleware/validate";
 import { requireAuth } from "../middleware/auth";
+import { createLoginLimiter } from "../middleware/rateLimit";
 import * as authService from "../services/auth.service";
-import { ApiErrors } from "../utils/errors";
 
 const router = Router();
 
@@ -12,7 +12,7 @@ const loginSchema = z.object({
   password: z.string().min(1).max(100),
 });
 
-router.post("/login", validate(loginSchema), async (req, res, next) => {
+router.post("/login", createLoginLimiter(), validate(loginSchema), async (req, res, next) => {
   try {
     const { email, password } = req.body;
     const result = await authService.login(email, password);

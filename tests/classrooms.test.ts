@@ -1,5 +1,5 @@
 import { describe, it, expect, beforeAll, afterAll } from "vitest";
-import { testRequest, loginAsAdmin, createTestClassroom, authHeader } from "./helpers";
+import { testRequest, loginAsAdmin, createTestClassroom } from "./helpers";
 import { prisma } from "../src/lib/prisma";
 
 describe("Classrooms", () => {
@@ -57,6 +57,10 @@ describe("Classrooms", () => {
       .delete(`/api/classrooms/${testClassroomId}`)
       .set("Authorization", `Bearer ${adminToken}`);
     expect(res.status).toBe(200);
-    expect(res.body.classroom.active).toBe(false);
+    expect(res.body.ok).toBe(true);
+
+    const list = await testRequest().get("/api/classrooms?includeInactive=true").set("Authorization", `Bearer ${adminToken}`);
+    const deleted = list.body.classrooms.find((c: any) => c.id === testClassroomId);
+    expect(deleted.active).toBe(false);
   });
 });
