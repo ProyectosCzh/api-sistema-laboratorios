@@ -56,7 +56,7 @@ describe("Users (ENCARGADO)", () => {
     expect(res.body.user.active).toBe(false);
   });
 
-  it("DELETE /users/:id - soft delete", async () => {
+  it("DELETE /users/:id - hard delete", async () => {
     const res = await testRequest()
       .delete(`/api/users/${createdUserId}`)
       .set("Authorization", `Bearer ${adminToken}`);
@@ -65,7 +65,7 @@ describe("Users (ENCARGADO)", () => {
 
     const list = await testRequest().get("/api/users").set("Authorization", `Bearer ${adminToken}`);
     const deleted = list.body.users.find((u: any) => u.id === createdUserId);
-    expect(deleted.active).toBe(false);
+    expect(deleted).toBeUndefined();
   });
 
   it("DELETE /users/:id - no puede eliminarse a sí mismo", async () => {

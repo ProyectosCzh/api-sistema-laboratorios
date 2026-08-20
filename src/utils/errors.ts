@@ -23,6 +23,12 @@ export const ApiErrors = {
   reservationConflict: () => new ApiError(409, "RESERVATION_CONFLICT", "Ese turno ya está ocupado en esta aula"),
   emailInUse: () => new ApiError(409, "EMAIL_IN_USE", "Ese email ya está registrado"),
   classroomCodeInUse: () => new ApiError(409, "CLASSROOM_CODE_IN_USE", "Ya existe un aula con ese código"),
+  userHasDependencies: () =>
+    new ApiError(
+      409,
+      "USER_HAS_DEPENDENCIES",
+      "No se puede eliminar el usuario porque tiene registros asociados"
+    ),
   noActiveSemester: () => new ApiError(409, "NO_ACTIVE_SEMESTER", "No hay semestre activo para operar horarios"),
   conflict: () => new ApiError(409, "CONFLICT", "Conflicto con un recurso existente"),
   rateLimited: () => new ApiError(429, "RATE_LIMIT_EXCEEDED", "Demasiados intentos, intentá de nuevo más tarde"),

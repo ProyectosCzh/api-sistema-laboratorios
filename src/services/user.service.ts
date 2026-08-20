@@ -35,5 +35,16 @@ export async function updateUser(id: string, data: { name?: string; email?: stri
 
 export async function deleteUser(id: string, currentUserId: string): Promise<void> {
   if (id === currentUserId) throw ApiErrors.cannotDeleteSelf();
-  await prisma.user.update({ where: { id }, data: { active: false } });
+
+  const [schedulesCount, annotationsCount, maintenanceCount] = await Promise.all([
+    prisma.schedule.count({ where: { assignedById: id } }),
+    prisma.annotation.count({ where: { userId: id } }),
+    prisma.maintenanceLog.count({ where: { createdById: id } }),
+  ]);
+
+  if (schedulesCount > 0 || annotationsCount > 0 || maintenanceCount > 0) {
+    throw ApiErrors.userHasDependencies();
+  }
+
+  await prisma.user.delete({ where: { id } });
 }

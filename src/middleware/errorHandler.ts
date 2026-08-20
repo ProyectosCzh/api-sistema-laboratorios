@@ -33,8 +33,11 @@ export function errorHandler(err: Error, _req: Request, res: Response, _next: Ne
       }
       return res.status(409).json(toBody(ApiErrors.conflict()));
     }
-    if (err.code === "P2025" || err.code === "P2003") {
+    if (err.code === "P2025") {
       return res.status(404).json(toBody(ApiErrors.notFound()));
+    }
+    if (err.code === "P2003") {
+      return res.status(409).json(toBody(ApiErrors.conflict()));
     }
   }
 
