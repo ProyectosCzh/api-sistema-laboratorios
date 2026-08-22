@@ -18,10 +18,17 @@ enum ClassroomType {
   AULA
 }
 
-enum ScheduleType {
+enum ClassroomStatus {
+  ACTIVA
+  INACTIVA
+  EN_MANTENIMIENTO
+  FUERA_SERVICIO
+}
+
+enum CourseOfferingType {
   CLASE
+  EXTRACURRICULAR
   ACTIVIDAD
-  MANTENIMIENTO
 }
 
 enum MaintenanceStatus {
@@ -45,15 +52,15 @@ model User {
 }
 
 model Classroom {
-  id          String          @id @default(cuid())
-  code        String          @unique
+  id          String           @id @default(cuid())
+  code        String           @unique
   name        String
   type        ClassroomType
   capacity    Int?
   location    String?
-  active      Boolean         @default(true)
-  createdAt   DateTime        @default(now())
-  updatedAt   DateTime        @updatedAt
+  status      ClassroomStatus  @default(ACTIVA)
+  createdAt   DateTime         @default(now())
+  updatedAt   DateTime         @updatedAt
   schedules   Schedule[]
   annotations Annotation[]
   maintenance MaintenanceLog[]
@@ -69,35 +76,83 @@ model TimeSlot {
 }
 
 model Semester {
-  id        String     @id @default(cuid())
-  name      String
-  startDate DateTime
-  endDate   DateTime
-  isActive  Boolean    @default(false)
+  id            String     @id @default(cuid())
+  name          String     @unique
+  startDate     DateTime
+  endDate       DateTime
+  isActive      Boolean    @default(false)
+  schedules     Schedule[]
+  offerings     CourseOffering[]
+
+  @@index([isActive])
+}
+
+model Teacher {
+  id             String           @id @default(cuid())
+  code           String           @unique
+  name           String
+  email          String?          @unique
+  active         Boolean          @default(true)
+  createdAt      DateTime         @default(now())
+  updatedAt      DateTime         @updatedAt
+  offerings      CourseOffering[]
+}
+
+model Subject {
+  id             String           @id @default(cuid())
+  code           String           @unique
+  name           String
+  active         Boolean          @default(true)
+  createdAt      DateTime         @default(now())
+  updatedAt      DateTime         @updatedAt
+  offerings      CourseOffering[]
+}
+
+model CourseOffering {
+  id         String             @id @default(cuid())
+  semesterId String
+  subjectId  String
+  teacherId  String?
+  section    String
+  type       CourseOfferingType @default(CLASE)
+  active     Boolean            @default(true)
+  note       String?
+  createdAt  DateTime           @default(now())
+  updatedAt  DateTime           @updatedAt
+
+  semester  Semester  @relation(fields: [semesterId], references: [id], onDelete: Cascade)
+  subject   Subject   @relation(fields: [subjectId], references: [id])
+  teacher   Teacher?  @relation(fields: [teacherId], references: [id])
   schedules Schedule[]
+
+  @@unique([semesterId, subjectId, section, teacherId])
+  @@index([semesterId])
+  @@index([subjectId])
+  @@index([teacherId])
 }
 
 model Schedule {
-  id           String       @id @default(cuid())
-  classroomId  String
-  semesterId   String
-  dayOfWeek    Int
-  timeSlotId   String
-  type         ScheduleType @default(CLASE)
-  title        String
-  teacher      String?
-  note         String?
-  assignedById String
-  createdAt    DateTime     @default(now())
-  updatedAt    DateTime     @updatedAt
+  id               String   @id @default(cuid())
+  classroomId      String
+  semesterId       String
+  courseOfferingId String
+  dayOfWeek        Int
+  timeSlotId       String
+  note             String?
+  assignedById     String
+  createdAt        DateTime @default(now())
+  updatedAt        DateTime @updatedAt
 
-  classroom  Classroom @relation(fields: [classroomId], references: [id], onDelete: Cascade)
-  semester   Semester  @relation(fields: [semesterId], references: [id], onDelete: Cascade)
-  timeSlot   TimeSlot  @relation(fields: [timeSlotId], references: [id])
-  assignedBy User      @relation(fields: [assignedById], references: [id])
+  classroom      Classroom      @relation(fields: [classroomId], references: [id], onDelete: Cascade)
+  semester       Semester       @relation(fields: [semesterId], references: [id], onDelete: Cascade)
+  courseOffering CourseOffering @relation(fields: [courseOfferingId], references: [id], onDelete: Cascade)
+  timeSlot       TimeSlot       @relation(fields: [timeSlotId], references: [id])
+  assignedBy     User           @relation(fields: [assignedById], references: [id])
 
   @@unique([classroomId, semesterId, dayOfWeek, timeSlotId])
+  @@unique([courseOfferingId, dayOfWeek, timeSlotId])
   @@index([classroomId, semesterId])
+  @@index([courseOfferingId])
 }
 
 model Annotation {
@@ -120,4 +175,6 @@ model MaintenanceLog {
   createdAt   DateTime          @default(now())
   classroom   Classroom         @relation(fields: [classroomId], references: [id], onDelete: Cascade)
   createdBy   User              @relation(fields: [createdById], references: [id])
+
+  @@index([classroomId, status])
 }
