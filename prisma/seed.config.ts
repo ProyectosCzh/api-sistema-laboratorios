@@ -1,4 +1,4 @@
-import { ClassroomType, ScheduleType, UserRole } from "@prisma/client";
+import { ClassroomType, CourseOfferingType, UserRole } from "@prisma/client";
 
 export interface TimeSlotSeed {
   id: string;
@@ -32,6 +32,28 @@ export interface AdminSeed {
   role: UserRole;
 }
 
+export interface TeacherSeed {
+  id: string;
+  code: string;
+  name: string;
+}
+
+export interface SubjectSeed {
+  id: string;
+  code: string;
+  name: string;
+  type: CourseOfferingType;
+}
+
+export interface BlockSeed {
+  classroomCode: string; // código del aula, ej. "D302"
+  dayOfWeek: number;     // 1 = Lunes ... 6 = Sábado
+  timeSlotOrder: number; // 1..9 (turno oficial)
+  subjectCode: string;   // código base de materia, ej. "DD311", "INGLES", "AULA-COMUN"
+  section: string;       // comisión, ej. "A", "Z1", "10/4", "5/5", "UNICA"
+  teacherCode?: string;  // ausente = sin docente (Excel)
+}
+
 export const TIME_SLOTS: TimeSlotSeed[] = [
   { id: "ts-1", label: "1° período", startTime: "07:15", endTime: "08:45", order: 1 },
   { id: "ts-2", label: "2° período", startTime: "08:55", endTime: "10:25", order: 2 },
@@ -45,6 +67,7 @@ export const TIME_SLOTS: TimeSlotSeed[] = [
 ];
 
 export const CLASSROOMS: ClassroomSeed[] = [
+  { id: "cls-d201", code: "D201", name: "Aula D201", type: ClassroomType.AULA, capacity: 25 },
   { id: "cls-d302", code: "D302", name: "Aula D302", type: ClassroomType.AULA, capacity: 25 },
   { id: "cls-d304", code: "D304", name: "Aula D304", type: ClassroomType.AULA, capacity: 25 },
   { id: "cls-e112", code: "E112", name: "Aula E112", type: ClassroomType.AULA, capacity: 25 },
@@ -61,135 +84,177 @@ export const SEMESTER: SemesterSeed = {
   endDate: new Date("2026-12-18T00:00:00.000Z"),
 };
 
-export interface ScheduleSeed {
-  classroomId: string;
-  dayOfWeek: number; // 1 = Lunes ... 6 = Sábado
-  timeSlotId: string;
-  type: ScheduleType;
-  title: string;
-  teacher?: string | null;
-}
+export const TEACHERS: TeacherSeed[] = [
+  { id: "tea-ampuero", code: "AMPUERO", name: "Ampuero" },
+  { id: "tea-cadario", code: "CADARIO", name: "Cadario" },
+  { id: "tea-cespedes", code: "CESPEDES", name: "Céspedes" },
+  { id: "tea-cil", code: "CIL", name: "CIL" },
+  { id: "tea-clouzet", code: "CLOUZET", name: "Clouzet" },
+  { id: "tea-conde", code: "CONDE", name: "Conde" },
+  { id: "tea-crespo", code: "CRESPO", name: "Crespo" },
+  { id: "tea-delaquintana", code: "DELAQUINTANA", name: "De la Quintana" },
+  { id: "tea-espinoza", code: "ESPINOZA", name: "Espinoza" },
+  { id: "tea-flores", code: "FLORES", name: "Flores" },
+  { id: "tea-gianella", code: "GIANELLA", name: "Gianella" },
+  { id: "tea-gutierrez", code: "GUTIERREZ", name: "Gutiérrez" },
+  { id: "tea-inglés", code: "INGLES", name: "Inglés" },
+  { id: "tea-lafuente", code: "LAFUENTE", name: "LaFuente" },
+  { id: "tea-mendez", code: "MENDEZ", name: "Méndez" },
+  { id: "tea-mercado", code: "MERCADO", name: "Mercado" },
+  { id: "tea-morales", code: "MORALES", name: "Morales" },
+  { id: "tea-ortega", code: "ORTEGA", name: "Ortega" },
+  { id: "tea-pinto", code: "PINTO", name: "Pinto" },
+  { id: "tea-rivera", code: "RIVERA", name: "Rivera" },
+  { id: "tea-riveras", code: "RIVERAS", name: "Rivera S." },
+  { id: "tea-rodriguez", code: "RODRIGUEZ", name: "Rodríguez" },
+  { id: "tea-sperez", code: "SPEREZ", name: "S. Pérez" },
+  { id: "tea-schrupp", code: "SCHRUPP", name: "Schrupp" },
+  { id: "tea-seigelschifer", code: "SEIGELSCHIFER", name: "Seigelschifer" },
+  { id: "tea-soria", code: "SORIA", name: "Soria" },
+  { id: "tea-talavera", code: "TALAVERA", name: "Talavera" },
+  { id: "tea-tinoco", code: "TINOCO", name: "Tinoco" },
+  { id: "tea-vargas", code: "VARGAS", name: "Vargas" },
+  { id: "tea-zeballos", code: "ZEBALLOS", name: "Zeballos" },
+];
 
-export const SCHEDULES: ScheduleSeed[] = [
-  // ============================== D302 ==============================
-  { classroomId: "cls-d302", dayOfWeek: 1, timeSlotId: "ts-1", type: ScheduleType.CLASE, title: "DD311-A", teacher: "Soria" },
-  { classroomId: "cls-d302", dayOfWeek: 1, timeSlotId: "ts-2", type: ScheduleType.CLASE, title: "DD111-B", teacher: "Soria" },
-  { classroomId: "cls-d302", dayOfWeek: 1, timeSlotId: "ts-3", type: ScheduleType.CLASE, title: "DD111-C", teacher: "Ampuero" },
-  { classroomId: "cls-d302", dayOfWeek: 1, timeSlotId: "ts-5", type: ScheduleType.CLASE, title: "DD211-A", teacher: "Rivera" },
-  { classroomId: "cls-d302", dayOfWeek: 1, timeSlotId: "ts-6", type: ScheduleType.CLASE, title: "IT312-Z1", teacher: "De la Quintana" },
-  { classroomId: "cls-d302", dayOfWeek: 1, timeSlotId: "ts-7", type: ScheduleType.CLASE, title: "IT312-Z3", teacher: "Tinoco" },
-  { classroomId: "cls-d302", dayOfWeek: 1, timeSlotId: "ts-8", type: ScheduleType.CLASE, title: "IT312-Z2 / DD411-A", teacher: "Céspedes" },
-  { classroomId: "cls-d302", dayOfWeek: 1, timeSlotId: "ts-9", type: ScheduleType.CLASE, title: "DD411-A", teacher: "Céspedes" },
-  { classroomId: "cls-d302", dayOfWeek: 2, timeSlotId: "ts-2", type: ScheduleType.CLASE, title: "PB412-A", teacher: "Talavera" },
-  { classroomId: "cls-d302", dayOfWeek: 2, timeSlotId: "ts-3", type: ScheduleType.CLASE, title: "PB412-B", teacher: "Talavera" },
-  { classroomId: "cls-d302", dayOfWeek: 2, timeSlotId: "ts-4", type: ScheduleType.CLASE, title: "DD111-C", teacher: "Ampuero" },
-  { classroomId: "cls-d302", dayOfWeek: 2, timeSlotId: "ts-6", type: ScheduleType.CLASE, title: "DD311-A", teacher: "De la Quintana" },
-  { classroomId: "cls-d302", dayOfWeek: 2, timeSlotId: "ts-8", type: ScheduleType.CLASE, title: "Excel (5/5)" },
-  { classroomId: "cls-d302", dayOfWeek: 3, timeSlotId: "ts-1", type: ScheduleType.CLASE, title: "DD311-A", teacher: "Soria" },
-  { classroomId: "cls-d302", dayOfWeek: 3, timeSlotId: "ts-2", type: ScheduleType.CLASE, title: "DD111-B", teacher: "Soria" },
-  { classroomId: "cls-d302", dayOfWeek: 3, timeSlotId: "ts-3", type: ScheduleType.CLASE, title: "DD111-C", teacher: "Ampuero" },
-  { classroomId: "cls-d302", dayOfWeek: 3, timeSlotId: "ts-7", type: ScheduleType.CLASE, title: "IT312-Z3", teacher: "Tinoco" },
-  { classroomId: "cls-d302", dayOfWeek: 3, timeSlotId: "ts-8", type: ScheduleType.CLASE, title: "IT312-Z2 / DD411-A", teacher: "Céspedes" },
-  { classroomId: "cls-d302", dayOfWeek: 3, timeSlotId: "ts-9", type: ScheduleType.CLASE, title: "DD411-A", teacher: "Céspedes" },
-  { classroomId: "cls-d302", dayOfWeek: 4, timeSlotId: "ts-2", type: ScheduleType.CLASE, title: "PB412-A", teacher: "Talavera" },
-  { classroomId: "cls-d302", dayOfWeek: 4, timeSlotId: "ts-3", type: ScheduleType.CLASE, title: "PB412-B", teacher: "Talavera" },
-  { classroomId: "cls-d302", dayOfWeek: 4, timeSlotId: "ts-4", type: ScheduleType.CLASE, title: "DD211-A", teacher: "Rivera" },
-  { classroomId: "cls-d302", dayOfWeek: 4, timeSlotId: "ts-5", type: ScheduleType.CLASE, title: "DD211-B", teacher: "Rivera S." },
-  { classroomId: "cls-d302", dayOfWeek: 4, timeSlotId: "ts-6", type: ScheduleType.CLASE, title: "IT312-Z1", teacher: "De la Quintana" },
-  { classroomId: "cls-d302", dayOfWeek: 4, timeSlotId: "ts-8", type: ScheduleType.CLASE, title: "Excel (5/5)" },
-  { classroomId: "cls-d302", dayOfWeek: 5, timeSlotId: "ts-1", type: ScheduleType.CLASE, title: "DD311-A", teacher: "Soria" },
-  { classroomId: "cls-d302", dayOfWeek: 5, timeSlotId: "ts-6", type: ScheduleType.CLASE, title: "DD211-B", teacher: "Rivera S." },
-  { classroomId: "cls-d302", dayOfWeek: 5, timeSlotId: "ts-7", type: ScheduleType.CLASE, title: "CV210-Z1", teacher: "Espinoza" },
+const REGULAR_SUBJECT_CODES = [
+  "AA326", "AD101", "CE210", "CE312", "CO201", "CV110", "CV210", "CV312", "CV410",
+  "DD111", "DD211", "DD311", "DD410", "DD411", "ET514", "FI202", "IT110", "IT312",
+  "IT422", "MA101", "MO110", "MO211", "MO311", "MO412", "MO413", "PB412", "QU101",
+  "SE101", "SY302",
+];
 
-  // ============================== D304 ==============================
-  { classroomId: "cls-d304", dayOfWeek: 1, timeSlotId: "ts-2", type: ScheduleType.CLASE, title: "DD111-B", teacher: "Schrupp" },
-  { classroomId: "cls-d304", dayOfWeek: 1, timeSlotId: "ts-3", type: ScheduleType.CLASE, title: "DD111-A", teacher: "Schrupp" },
-  { classroomId: "cls-d304", dayOfWeek: 1, timeSlotId: "ts-5", type: ScheduleType.CLASE, title: "IT110-B", teacher: "Crespo" },
-  { classroomId: "cls-d304", dayOfWeek: 1, timeSlotId: "ts-6", type: ScheduleType.CLASE, title: "DD111-A", teacher: "Schrupp" },
-  { classroomId: "cls-d304", dayOfWeek: 1, timeSlotId: "ts-7", type: ScheduleType.CLASE, title: "DD111-A", teacher: "Schrupp" },
-  { classroomId: "cls-d304", dayOfWeek: 1, timeSlotId: "ts-8", type: ScheduleType.CLASE, title: "CE312-A", teacher: "Cadario" },
-  { classroomId: "cls-d304", dayOfWeek: 1, timeSlotId: "ts-9", type: ScheduleType.CLASE, title: "CE312-A", teacher: "Cadario" },
-  { classroomId: "cls-d304", dayOfWeek: 2, timeSlotId: "ts-1", type: ScheduleType.CLASE, title: "DD410-A", teacher: "Seigelschifer" },
-  { classroomId: "cls-d304", dayOfWeek: 2, timeSlotId: "ts-2", type: ScheduleType.CLASE, title: "AA326-A", teacher: "Crespo" },
-  { classroomId: "cls-d304", dayOfWeek: 2, timeSlotId: "ts-3", type: ScheduleType.CLASE, title: "IT422-A", teacher: "Zeballos" },
-  { classroomId: "cls-d304", dayOfWeek: 2, timeSlotId: "ts-4", type: ScheduleType.CLASE, title: "IT110-A", teacher: "Crespo" },
-  { classroomId: "cls-d304", dayOfWeek: 2, timeSlotId: "ts-8", type: ScheduleType.ACTIVIDAD, title: "Aula Común", teacher: "Céspedes" },
-  { classroomId: "cls-d304", dayOfWeek: 3, timeSlotId: "ts-2", type: ScheduleType.CLASE, title: "DD111-B", teacher: "Schrupp" },
-  { classroomId: "cls-d304", dayOfWeek: 3, timeSlotId: "ts-3", type: ScheduleType.CLASE, title: "DD111-A", teacher: "Schrupp" },
-  { classroomId: "cls-d304", dayOfWeek: 3, timeSlotId: "ts-4", type: ScheduleType.CLASE, title: "DD111-C", teacher: "Seigelschifer" },
-  { classroomId: "cls-d304", dayOfWeek: 3, timeSlotId: "ts-5", type: ScheduleType.CLASE, title: "IT110-A", teacher: "Seigelschifer" },
-  { classroomId: "cls-d304", dayOfWeek: 3, timeSlotId: "ts-8", type: ScheduleType.CLASE, title: "CE312-A", teacher: "Cadario" },
-  { classroomId: "cls-d304", dayOfWeek: 3, timeSlotId: "ts-9", type: ScheduleType.CLASE, title: "ET514-Z1", teacher: "Gutiérrez" },
-  { classroomId: "cls-d304", dayOfWeek: 4, timeSlotId: "ts-1", type: ScheduleType.CLASE, title: "DD410-A", teacher: "Seigelschifer" },
-  { classroomId: "cls-d304", dayOfWeek: 4, timeSlotId: "ts-2", type: ScheduleType.CLASE, title: "AA326-A", teacher: "Crespo" },
-  { classroomId: "cls-d304", dayOfWeek: 4, timeSlotId: "ts-3", type: ScheduleType.CLASE, title: "CE210-A", teacher: "CIL" },
-  { classroomId: "cls-d304", dayOfWeek: 4, timeSlotId: "ts-4", type: ScheduleType.CLASE, title: "IT110-B", teacher: "Crespo" },
-  { classroomId: "cls-d304", dayOfWeek: 5, timeSlotId: "ts-2", type: ScheduleType.CLASE, title: "AA326-A", teacher: "Crespo" },
-  { classroomId: "cls-d304", dayOfWeek: 5, timeSlotId: "ts-3", type: ScheduleType.CLASE, title: "PB412-A", teacher: "Talavera" },
-  { classroomId: "cls-d304", dayOfWeek: 5, timeSlotId: "ts-4", type: ScheduleType.CLASE, title: "DD111-C", teacher: "Seigelschifer" },
-  { classroomId: "cls-d304", dayOfWeek: 5, timeSlotId: "ts-5", type: ScheduleType.CLASE, title: "DD111-E", teacher: "Seigelschifer" },
-  { classroomId: "cls-d304", dayOfWeek: 5, timeSlotId: "ts-7", type: ScheduleType.CLASE, title: "CV312-Z1", teacher: "Conde" },
+export const SUBJECTS: SubjectSeed[] = [
+  ...REGULAR_SUBJECT_CODES.map(code => ({ id: `sub-${code.toLowerCase()}`, code, name: code, type: CourseOfferingType.CLASE })),
+  { id: "sub-ingles", code: "INGLES", name: "Inglés", type: CourseOfferingType.EXTRACURRICULAR },
+  { id: "sub-excel", code: "EXCEL", name: "Excel", type: CourseOfferingType.EXTRACURRICULAR },
+  { id: "sub-aula-comun", code: "AULA-COMUN", name: "Aula Común", type: CourseOfferingType.ACTIVIDAD },
+];
 
-  // ============================== E112 ==============================
-  { classroomId: "cls-e112", dayOfWeek: 1, timeSlotId: "ts-1", type: ScheduleType.CLASE, title: "MO412-B", teacher: "Clouzet" },
-  { classroomId: "cls-e112", dayOfWeek: 1, timeSlotId: "ts-2", type: ScheduleType.CLASE, title: "MO412-A", teacher: "Clouzet" },
-  { classroomId: "cls-e112", dayOfWeek: 1, timeSlotId: "ts-3", type: ScheduleType.CLASE, title: "MO412-B", teacher: "Clouzet" },
-  { classroomId: "cls-e112", dayOfWeek: 1, timeSlotId: "ts-6", type: ScheduleType.CLASE, title: "MO311-A", teacher: "Gutiérrez" },
-  { classroomId: "cls-e112", dayOfWeek: 1, timeSlotId: "ts-7", type: ScheduleType.CLASE, title: "MO311-B", teacher: "Gutiérrez" },
-  { classroomId: "cls-e112", dayOfWeek: 2, timeSlotId: "ts-2", type: ScheduleType.CLASE, title: "CV110-A", teacher: "Gianella" },
-  { classroomId: "cls-e112", dayOfWeek: 2, timeSlotId: "ts-3", type: ScheduleType.CLASE, title: "CV110-B", teacher: "Gianella" },
-  { classroomId: "cls-e112", dayOfWeek: 2, timeSlotId: "ts-4", type: ScheduleType.CLASE, title: "MO311-A", teacher: "Mercado" },
-  { classroomId: "cls-e112", dayOfWeek: 2, timeSlotId: "ts-5", type: ScheduleType.CLASE, title: "CE210-B", teacher: "Mercado" },
-  { classroomId: "cls-e112", dayOfWeek: 2, timeSlotId: "ts-6", type: ScheduleType.CLASE, title: "MO412-D", teacher: "Mercado" },
-  { classroomId: "cls-e112", dayOfWeek: 2, timeSlotId: "ts-7", type: ScheduleType.CLASE, title: "CE210-D", teacher: "Mercado" },
-  { classroomId: "cls-e112", dayOfWeek: 3, timeSlotId: "ts-1", type: ScheduleType.CLASE, title: "MO412-A", teacher: "Clouzet" },
-  { classroomId: "cls-e112", dayOfWeek: 3, timeSlotId: "ts-2", type: ScheduleType.CLASE, title: "MO412-B", teacher: "Clouzet" },
-  { classroomId: "cls-e112", dayOfWeek: 3, timeSlotId: "ts-3", type: ScheduleType.CLASE, title: "MO412-A", teacher: "Clouzet" },
-  { classroomId: "cls-e112", dayOfWeek: 3, timeSlotId: "ts-4", type: ScheduleType.CLASE, title: "MO110-A", teacher: "LaFuente" },
-  { classroomId: "cls-e112", dayOfWeek: 3, timeSlotId: "ts-5", type: ScheduleType.CLASE, title: "MO110-B", teacher: "LaFuente" },
-  { classroomId: "cls-e112", dayOfWeek: 3, timeSlotId: "ts-6", type: ScheduleType.CLASE, title: "MO110-C", teacher: "LaFuente" },
-  { classroomId: "cls-e112", dayOfWeek: 3, timeSlotId: "ts-7", type: ScheduleType.CLASE, title: "MO110-D", teacher: "LaFuente" },
-  { classroomId: "cls-e112", dayOfWeek: 3, timeSlotId: "ts-8", type: ScheduleType.CLASE, title: "MO110-E", teacher: "LaFuente" },
-  { classroomId: "cls-e112", dayOfWeek: 4, timeSlotId: "ts-1", type: ScheduleType.CLASE, title: "CE210-E", teacher: "Mercado" },
-  { classroomId: "cls-e112", dayOfWeek: 4, timeSlotId: "ts-2", type: ScheduleType.CLASE, title: "CV410-A", teacher: "Espinoza" },
-  { classroomId: "cls-e112", dayOfWeek: 4, timeSlotId: "ts-3", type: ScheduleType.CLASE, title: "CV410-B", teacher: "Espinoza" },
-  { classroomId: "cls-e112", dayOfWeek: 4, timeSlotId: "ts-4", type: ScheduleType.CLASE, title: "IT110-C", teacher: "S. Pérez" },
-  { classroomId: "cls-e112", dayOfWeek: 4, timeSlotId: "ts-5", type: ScheduleType.CLASE, title: "MO413-A", teacher: "S. Pérez" },
-  { classroomId: "cls-e112", dayOfWeek: 4, timeSlotId: "ts-6", type: ScheduleType.CLASE, title: "MO413-B", teacher: "S. Pérez" },
-  { classroomId: "cls-e112", dayOfWeek: 5, timeSlotId: "ts-1", type: ScheduleType.CLASE, title: "MO211-A", teacher: "Gutiérrez" },
-  { classroomId: "cls-e112", dayOfWeek: 5, timeSlotId: "ts-2", type: ScheduleType.CLASE, title: "DD211-C", teacher: "Gianella" },
-  { classroomId: "cls-e112", dayOfWeek: 5, timeSlotId: "ts-3", type: ScheduleType.CLASE, title: "MO211-C", teacher: "Gianella" },
-  { classroomId: "cls-e112", dayOfWeek: 5, timeSlotId: "ts-4", type: ScheduleType.CLASE, title: "MO110-A", teacher: "LaFuente" },
-  { classroomId: "cls-e112", dayOfWeek: 5, timeSlotId: "ts-5", type: ScheduleType.CLASE, title: "MO110-B", teacher: "LaFuente" },
-  { classroomId: "cls-e112", dayOfWeek: 5, timeSlotId: "ts-6", type: ScheduleType.CLASE, title: "CE210-C/MO211-B", teacher: "Mercado" },
-  { classroomId: "cls-e112", dayOfWeek: 5, timeSlotId: "ts-7", type: ScheduleType.CLASE, title: "MO311-B", teacher: "Gutiérrez" },
-  { classroomId: "cls-e112", dayOfWeek: 6, timeSlotId: "ts-1", type: ScheduleType.CLASE, title: "MO211-A", teacher: "Gutiérrez" },
-  { classroomId: "cls-e112", dayOfWeek: 6, timeSlotId: "ts-2", type: ScheduleType.CLASE, title: "MO211-A", teacher: "Gutiérrez" },
-  { classroomId: "cls-e112", dayOfWeek: 6, timeSlotId: "ts-3", type: ScheduleType.CLASE, title: "MO211-B", teacher: "Gutiérrez" },
-  { classroomId: "cls-e112", dayOfWeek: 6, timeSlotId: "ts-4", type: ScheduleType.CLASE, title: "MO211-B", teacher: "Gutiérrez" },
+export const BLOCKS: BlockSeed[] = [
+  // ============================== D302 (31) ==============================
+  { classroomCode: "D302", dayOfWeek: 1, timeSlotOrder: 1, subjectCode: "DD311", section: "A", teacherCode: "SORIA" },
+  { classroomCode: "D302", dayOfWeek: 1, timeSlotOrder: 2, subjectCode: "DD111", section: "B", teacherCode: "SORIA" },
+  { classroomCode: "D302", dayOfWeek: 1, timeSlotOrder: 3, subjectCode: "DD111", section: "C", teacherCode: "AMPUERO" },
+  { classroomCode: "D302", dayOfWeek: 1, timeSlotOrder: 4, subjectCode: "INGLES", section: "10/4", teacherCode: "INGLES" },
+  { classroomCode: "D302", dayOfWeek: 1, timeSlotOrder: 5, subjectCode: "DD211", section: "A", teacherCode: "RIVERA" },
+  { classroomCode: "D302", dayOfWeek: 1, timeSlotOrder: 6, subjectCode: "IT312", section: "Z1", teacherCode: "DELAQUINTANA" },
+  { classroomCode: "D302", dayOfWeek: 1, timeSlotOrder: 7, subjectCode: "IT312", section: "Z3", teacherCode: "TINOCO" },
+  { classroomCode: "D302", dayOfWeek: 1, timeSlotOrder: 8, subjectCode: "IT312", section: "Z2", teacherCode: "CESPEDES" },
+  { classroomCode: "D302", dayOfWeek: 1, timeSlotOrder: 9, subjectCode: "DD411", section: "A", teacherCode: "CESPEDES" },
+  { classroomCode: "D302", dayOfWeek: 2, timeSlotOrder: 2, subjectCode: "PB412", section: "A", teacherCode: "TALAVERA" },
+  { classroomCode: "D302", dayOfWeek: 2, timeSlotOrder: 3, subjectCode: "PB412", section: "B", teacherCode: "TALAVERA" },
+  { classroomCode: "D302", dayOfWeek: 2, timeSlotOrder: 4, subjectCode: "DD111", section: "C", teacherCode: "AMPUERO" },
+  { classroomCode: "D302", dayOfWeek: 2, timeSlotOrder: 6, subjectCode: "DD311", section: "A", teacherCode: "DELAQUINTANA" },
+  { classroomCode: "D302", dayOfWeek: 2, timeSlotOrder: 8, subjectCode: "EXCEL", section: "5/5" },
+  { classroomCode: "D302", dayOfWeek: 3, timeSlotOrder: 1, subjectCode: "DD311", section: "A", teacherCode: "SORIA" },
+  { classroomCode: "D302", dayOfWeek: 3, timeSlotOrder: 2, subjectCode: "DD111", section: "B", teacherCode: "SORIA" },
+  { classroomCode: "D302", dayOfWeek: 3, timeSlotOrder: 3, subjectCode: "DD111", section: "C", teacherCode: "AMPUERO" },
+  { classroomCode: "D302", dayOfWeek: 3, timeSlotOrder: 7, subjectCode: "IT312", section: "Z3", teacherCode: "TINOCO" },
+  { classroomCode: "D302", dayOfWeek: 3, timeSlotOrder: 8, subjectCode: "IT312", section: "Z2", teacherCode: "CESPEDES" },
+  { classroomCode: "D302", dayOfWeek: 3, timeSlotOrder: 9, subjectCode: "DD411", section: "A", teacherCode: "CESPEDES" },
+  { classroomCode: "D302", dayOfWeek: 4, timeSlotOrder: 2, subjectCode: "PB412", section: "A", teacherCode: "TALAVERA" },
+  { classroomCode: "D302", dayOfWeek: 4, timeSlotOrder: 3, subjectCode: "PB412", section: "B", teacherCode: "TALAVERA" },
+  { classroomCode: "D302", dayOfWeek: 4, timeSlotOrder: 4, subjectCode: "DD211", section: "A", teacherCode: "RIVERA" },
+  { classroomCode: "D302", dayOfWeek: 4, timeSlotOrder: 5, subjectCode: "DD211", section: "B", teacherCode: "RIVERAS" },
+  { classroomCode: "D302", dayOfWeek: 4, timeSlotOrder: 6, subjectCode: "IT312", section: "Z1", teacherCode: "DELAQUINTANA" },
+  { classroomCode: "D302", dayOfWeek: 4, timeSlotOrder: 8, subjectCode: "EXCEL", section: "5/5" },
+  { classroomCode: "D302", dayOfWeek: 5, timeSlotOrder: 1, subjectCode: "DD311", section: "A", teacherCode: "SORIA" },
+  { classroomCode: "D302", dayOfWeek: 5, timeSlotOrder: 2, subjectCode: "INGLES", section: "10/4", teacherCode: "INGLES" },
+  { classroomCode: "D302", dayOfWeek: 5, timeSlotOrder: 3, subjectCode: "INGLES", section: "10/4", teacherCode: "INGLES" },
+  { classroomCode: "D302", dayOfWeek: 5, timeSlotOrder: 6, subjectCode: "DD211", section: "B", teacherCode: "RIVERAS" },
+  { classroomCode: "D302", dayOfWeek: 5, timeSlotOrder: 7, subjectCode: "CV210", section: "Z1", teacherCode: "ESPINOZA" },
 
-  // ============================== D401 ==============================
-  { classroomId: "cls-d401", dayOfWeek: 1, timeSlotId: "ts-1", type: ScheduleType.CLASE, title: "MA101-A", teacher: "Rodríguez" },
-  { classroomId: "cls-d401", dayOfWeek: 1, timeSlotId: "ts-2", type: ScheduleType.CLASE, title: "MA101-A", teacher: "Rodríguez" },
-  { classroomId: "cls-d401", dayOfWeek: 3, timeSlotId: "ts-1", type: ScheduleType.CLASE, title: "MA101-A", teacher: "Rodríguez" },
-  { classroomId: "cls-d401", dayOfWeek: 3, timeSlotId: "ts-2", type: ScheduleType.CLASE, title: "MA101-A", teacher: "Rodríguez" },
-  { classroomId: "cls-d401", dayOfWeek: 5, timeSlotId: "ts-3", type: ScheduleType.CLASE, title: "FI202-B", teacher: "Vargas" },
+  // ============================== D304 (28) ==============================
+  { classroomCode: "D304", dayOfWeek: 1, timeSlotOrder: 2, subjectCode: "DD111", section: "B", teacherCode: "SCHRUPP" },
+  { classroomCode: "D304", dayOfWeek: 1, timeSlotOrder: 3, subjectCode: "DD111", section: "A", teacherCode: "SCHRUPP" },
+  { classroomCode: "D304", dayOfWeek: 1, timeSlotOrder: 4, subjectCode: "INGLES", section: "10/4-B", teacherCode: "INGLES" },
+  { classroomCode: "D304", dayOfWeek: 1, timeSlotOrder: 5, subjectCode: "IT110", section: "B", teacherCode: "CRESPO" },
+  { classroomCode: "D304", dayOfWeek: 1, timeSlotOrder: 6, subjectCode: "DD111", section: "A", teacherCode: "SCHRUPP" },
+  { classroomCode: "D304", dayOfWeek: 1, timeSlotOrder: 7, subjectCode: "DD111", section: "A", teacherCode: "SCHRUPP" },
+  { classroomCode: "D304", dayOfWeek: 1, timeSlotOrder: 8, subjectCode: "CE312", section: "A", teacherCode: "CADARIO" },
+  { classroomCode: "D304", dayOfWeek: 1, timeSlotOrder: 9, subjectCode: "CE312", section: "A", teacherCode: "CADARIO" },
+  { classroomCode: "D304", dayOfWeek: 2, timeSlotOrder: 1, subjectCode: "DD410", section: "A", teacherCode: "SEIGELSCHIFER" },
+  { classroomCode: "D304", dayOfWeek: 2, timeSlotOrder: 2, subjectCode: "AA326", section: "A", teacherCode: "CRESPO" },
+  { classroomCode: "D304", dayOfWeek: 2, timeSlotOrder: 3, subjectCode: "IT422", section: "A", teacherCode: "ZEBALLOS" },
+  { classroomCode: "D304", dayOfWeek: 2, timeSlotOrder: 4, subjectCode: "IT110", section: "A", teacherCode: "CRESPO" },
+  { classroomCode: "D304", dayOfWeek: 2, timeSlotOrder: 8, subjectCode: "AULA-COMUN", section: "UNICA", teacherCode: "CESPEDES" },
+  { classroomCode: "D304", dayOfWeek: 3, timeSlotOrder: 2, subjectCode: "DD111", section: "B", teacherCode: "SCHRUPP" },
+  { classroomCode: "D304", dayOfWeek: 3, timeSlotOrder: 3, subjectCode: "DD111", section: "A", teacherCode: "SCHRUPP" },
+  { classroomCode: "D304", dayOfWeek: 3, timeSlotOrder: 4, subjectCode: "DD111", section: "C", teacherCode: "SEIGELSCHIFER" },
+  { classroomCode: "D304", dayOfWeek: 3, timeSlotOrder: 5, subjectCode: "IT110", section: "A", teacherCode: "SEIGELSCHIFER" },
+  { classroomCode: "D304", dayOfWeek: 3, timeSlotOrder: 8, subjectCode: "CE312", section: "A", teacherCode: "CADARIO" },
+  { classroomCode: "D304", dayOfWeek: 3, timeSlotOrder: 9, subjectCode: "ET514", section: "Z1", teacherCode: "GUTIERREZ" },
+  { classroomCode: "D304", dayOfWeek: 4, timeSlotOrder: 1, subjectCode: "DD410", section: "A", teacherCode: "SEIGELSCHIFER" },
+  { classroomCode: "D304", dayOfWeek: 4, timeSlotOrder: 2, subjectCode: "AA326", section: "A", teacherCode: "CRESPO" },
+  { classroomCode: "D304", dayOfWeek: 4, timeSlotOrder: 3, subjectCode: "CE210", section: "A", teacherCode: "CIL" },
+  { classroomCode: "D304", dayOfWeek: 4, timeSlotOrder: 4, subjectCode: "IT110", section: "B", teacherCode: "CRESPO" },
+  { classroomCode: "D304", dayOfWeek: 5, timeSlotOrder: 2, subjectCode: "AA326", section: "A", teacherCode: "CRESPO" },
+  { classroomCode: "D304", dayOfWeek: 5, timeSlotOrder: 3, subjectCode: "PB412", section: "A", teacherCode: "TALAVERA" },
+  { classroomCode: "D304", dayOfWeek: 5, timeSlotOrder: 4, subjectCode: "DD111", section: "C", teacherCode: "SEIGELSCHIFER" },
+  { classroomCode: "D304", dayOfWeek: 5, timeSlotOrder: 5, subjectCode: "DD111", section: "E", teacherCode: "SEIGELSCHIFER" },
+  { classroomCode: "D304", dayOfWeek: 5, timeSlotOrder: 7, subjectCode: "CV312", section: "Z1", teacherCode: "CONDE" },
 
-  // ============================== D402 ==============================
-  { classroomId: "cls-d402", dayOfWeek: 2, timeSlotId: "ts-2", type: ScheduleType.CLASE, title: "QU101-C", teacher: "Flores" },
-  { classroomId: "cls-d402", dayOfWeek: 2, timeSlotId: "ts-3", type: ScheduleType.CLASE, title: "QU101-C", teacher: "Flores" },
-  { classroomId: "cls-d402", dayOfWeek: 4, timeSlotId: "ts-2", type: ScheduleType.CLASE, title: "QU101-C", teacher: "Flores" },
-  { classroomId: "cls-d402", dayOfWeek: 4, timeSlotId: "ts-3", type: ScheduleType.CLASE, title: "QU101-C", teacher: "Flores" },
+  // ============================== E112 (36) ==============================
+  { classroomCode: "E112", dayOfWeek: 1, timeSlotOrder: 1, subjectCode: "MO412", section: "B", teacherCode: "CLOUZET" },
+  { classroomCode: "E112", dayOfWeek: 1, timeSlotOrder: 2, subjectCode: "MO412", section: "A", teacherCode: "CLOUZET" },
+  { classroomCode: "E112", dayOfWeek: 1, timeSlotOrder: 3, subjectCode: "MO412", section: "B", teacherCode: "CLOUZET" },
+  { classroomCode: "E112", dayOfWeek: 1, timeSlotOrder: 6, subjectCode: "MO311", section: "A", teacherCode: "GUTIERREZ" },
+  { classroomCode: "E112", dayOfWeek: 1, timeSlotOrder: 7, subjectCode: "MO311", section: "B", teacherCode: "GUTIERREZ" },
+  { classroomCode: "E112", dayOfWeek: 2, timeSlotOrder: 2, subjectCode: "CV110", section: "A", teacherCode: "GIANELLA" },
+  { classroomCode: "E112", dayOfWeek: 2, timeSlotOrder: 3, subjectCode: "CV110", section: "B", teacherCode: "GIANELLA" },
+  { classroomCode: "E112", dayOfWeek: 2, timeSlotOrder: 4, subjectCode: "MO311", section: "A", teacherCode: "MERCADO" },
+  { classroomCode: "E112", dayOfWeek: 2, timeSlotOrder: 5, subjectCode: "CE210", section: "B", teacherCode: "MERCADO" },
+  { classroomCode: "E112", dayOfWeek: 2, timeSlotOrder: 6, subjectCode: "MO412", section: "D", teacherCode: "MERCADO" },
+  { classroomCode: "E112", dayOfWeek: 2, timeSlotOrder: 7, subjectCode: "CE210", section: "D", teacherCode: "MERCADO" },
+  { classroomCode: "E112", dayOfWeek: 3, timeSlotOrder: 1, subjectCode: "MO412", section: "A", teacherCode: "CLOUZET" },
+  { classroomCode: "E112", dayOfWeek: 3, timeSlotOrder: 2, subjectCode: "MO412", section: "B", teacherCode: "CLOUZET" },
+  { classroomCode: "E112", dayOfWeek: 3, timeSlotOrder: 3, subjectCode: "MO412", section: "A", teacherCode: "CLOUZET" },
+  { classroomCode: "E112", dayOfWeek: 3, timeSlotOrder: 4, subjectCode: "MO110", section: "A", teacherCode: "LAFUENTE" },
+  { classroomCode: "E112", dayOfWeek: 3, timeSlotOrder: 5, subjectCode: "MO110", section: "B", teacherCode: "LAFUENTE" },
+  { classroomCode: "E112", dayOfWeek: 3, timeSlotOrder: 6, subjectCode: "MO110", section: "C", teacherCode: "LAFUENTE" },
+  { classroomCode: "E112", dayOfWeek: 3, timeSlotOrder: 7, subjectCode: "MO110", section: "D", teacherCode: "LAFUENTE" },
+  { classroomCode: "E112", dayOfWeek: 3, timeSlotOrder: 8, subjectCode: "MO110", section: "E", teacherCode: "LAFUENTE" },
+  { classroomCode: "E112", dayOfWeek: 4, timeSlotOrder: 1, subjectCode: "CE210", section: "E", teacherCode: "MERCADO" },
+  { classroomCode: "E112", dayOfWeek: 4, timeSlotOrder: 2, subjectCode: "CV410", section: "A", teacherCode: "ESPINOZA" },
+  { classroomCode: "E112", dayOfWeek: 4, timeSlotOrder: 3, subjectCode: "CV410", section: "B", teacherCode: "ESPINOZA" },
+  { classroomCode: "E112", dayOfWeek: 4, timeSlotOrder: 4, subjectCode: "IT110", section: "C", teacherCode: "SPEREZ" },
+  { classroomCode: "E112", dayOfWeek: 4, timeSlotOrder: 5, subjectCode: "MO413", section: "A", teacherCode: "SPEREZ" },
+  { classroomCode: "E112", dayOfWeek: 4, timeSlotOrder: 6, subjectCode: "MO413", section: "B", teacherCode: "SPEREZ" },
+  { classroomCode: "E112", dayOfWeek: 5, timeSlotOrder: 1, subjectCode: "MO211", section: "A", teacherCode: "GUTIERREZ" },
+  { classroomCode: "E112", dayOfWeek: 5, timeSlotOrder: 2, subjectCode: "DD211", section: "C", teacherCode: "GIANELLA" },
+  { classroomCode: "E112", dayOfWeek: 5, timeSlotOrder: 3, subjectCode: "MO211", section: "C", teacherCode: "GIANELLA" },
+  { classroomCode: "E112", dayOfWeek: 5, timeSlotOrder: 4, subjectCode: "MO110", section: "A", teacherCode: "LAFUENTE" },
+  { classroomCode: "E112", dayOfWeek: 5, timeSlotOrder: 5, subjectCode: "MO110", section: "B", teacherCode: "LAFUENTE" },
+  { classroomCode: "E112", dayOfWeek: 5, timeSlotOrder: 6, subjectCode: "CE210", section: "C", teacherCode: "MERCADO" },
+  { classroomCode: "E112", dayOfWeek: 5, timeSlotOrder: 7, subjectCode: "MO311", section: "B", teacherCode: "GUTIERREZ" },
+  { classroomCode: "E112", dayOfWeek: 6, timeSlotOrder: 1, subjectCode: "MO211", section: "A", teacherCode: "GUTIERREZ" },
+  { classroomCode: "E112", dayOfWeek: 6, timeSlotOrder: 2, subjectCode: "MO211", section: "A", teacherCode: "GUTIERREZ" },
+  { classroomCode: "E112", dayOfWeek: 6, timeSlotOrder: 3, subjectCode: "MO211", section: "B", teacherCode: "GUTIERREZ" },
+  { classroomCode: "E112", dayOfWeek: 6, timeSlotOrder: 4, subjectCode: "MO211", section: "B", teacherCode: "GUTIERREZ" },
 
-  // ============================== D403 ==============================
-  { classroomId: "cls-d403", dayOfWeek: 1, timeSlotId: "ts-5", type: ScheduleType.CLASE, title: "AD101-B", teacher: "Morales" },
-  { classroomId: "cls-d403", dayOfWeek: 3, timeSlotId: "ts-5", type: ScheduleType.CLASE, title: "AD101-B", teacher: "Morales" },
-  { classroomId: "cls-d403", dayOfWeek: 5, timeSlotId: "ts-6", type: ScheduleType.CLASE, title: "SY302-A", teacher: "Ortega" },
+  // ============================== D401 (5) ==============================
+  { classroomCode: "D401", dayOfWeek: 1, timeSlotOrder: 1, subjectCode: "MA101", section: "A", teacherCode: "RODRIGUEZ" },
+  { classroomCode: "D401", dayOfWeek: 1, timeSlotOrder: 2, subjectCode: "MA101", section: "A", teacherCode: "RODRIGUEZ" },
+  { classroomCode: "D401", dayOfWeek: 3, timeSlotOrder: 1, subjectCode: "MA101", section: "A", teacherCode: "RODRIGUEZ" },
+  { classroomCode: "D401", dayOfWeek: 3, timeSlotOrder: 2, subjectCode: "MA101", section: "A", teacherCode: "RODRIGUEZ" },
+  { classroomCode: "D401", dayOfWeek: 5, timeSlotOrder: 3, subjectCode: "FI202", section: "B", teacherCode: "VARGAS" },
 
-  // ============================== D404 ==============================
-  { classroomId: "cls-d404", dayOfWeek: 2, timeSlotId: "ts-7", type: ScheduleType.CLASE, title: "CO201-A", teacher: "Méndez" },
-  { classroomId: "cls-d404", dayOfWeek: 4, timeSlotId: "ts-7", type: ScheduleType.CLASE, title: "CO201-A", teacher: "Méndez" },
-  { classroomId: "cls-d404", dayOfWeek: 6, timeSlotId: "ts-2", type: ScheduleType.CLASE, title: "SE101-Z", teacher: "Pinto" },
+  // ============================== D402 (4) ==============================
+  { classroomCode: "D402", dayOfWeek: 2, timeSlotOrder: 2, subjectCode: "QU101", section: "C", teacherCode: "FLORES" },
+  { classroomCode: "D402", dayOfWeek: 2, timeSlotOrder: 3, subjectCode: "QU101", section: "C", teacherCode: "FLORES" },
+  { classroomCode: "D402", dayOfWeek: 4, timeSlotOrder: 2, subjectCode: "QU101", section: "C", teacherCode: "FLORES" },
+  { classroomCode: "D402", dayOfWeek: 4, timeSlotOrder: 3, subjectCode: "QU101", section: "C", teacherCode: "FLORES" },
+
+  // ============================== D403 (3) ==============================
+  { classroomCode: "D403", dayOfWeek: 1, timeSlotOrder: 5, subjectCode: "AD101", section: "B", teacherCode: "MORALES" },
+  { classroomCode: "D403", dayOfWeek: 3, timeSlotOrder: 5, subjectCode: "AD101", section: "B", teacherCode: "MORALES" },
+  { classroomCode: "D403", dayOfWeek: 5, timeSlotOrder: 6, subjectCode: "SY302", section: "A", teacherCode: "ORTEGA" },
+
+  // ============================== D404 (3) ==============================
+  { classroomCode: "D404", dayOfWeek: 2, timeSlotOrder: 7, subjectCode: "CO201", section: "A", teacherCode: "MENDEZ" },
+  { classroomCode: "D404", dayOfWeek: 4, timeSlotOrder: 7, subjectCode: "CO201", section: "A", teacherCode: "MENDEZ" },
+  { classroomCode: "D404", dayOfWeek: 6, timeSlotOrder: 2, subjectCode: "SE101", section: "Z", teacherCode: "PINTO" },
 ];
 
 export const ADMIN: AdminSeed = {

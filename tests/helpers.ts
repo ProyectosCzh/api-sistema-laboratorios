@@ -1,7 +1,7 @@
 import { app } from "../src/app";
 import request from "supertest";
 import { prisma } from "../src/lib/prisma";
-import type { AuthResponse, Classroom, Semester } from "../src/types";
+import type { AuthResponse, Classroom, CourseOffering, Semester, Subject, Teacher } from "../src/types";
 
 export const testRequest = () => request(app);
 
@@ -62,4 +62,45 @@ export async function activateSemester(adminToken: string, id: string): Promise<
     .set("Authorization", `Bearer ${adminToken}`);
   if (res.status !== 200) throw new Error(`Activate semester failed: ${JSON.stringify(res.body)}`);
   return res.body.semester;
+}
+
+const suffix = () => Date.now().toString(36) + Math.random().toString(36).slice(2, 6);
+
+export async function createTestSubject(adminToken: string, code?: string): Promise<Subject> {
+  const res = await testRequest()
+    .post("/api/subjects")
+    .set("Authorization", `Bearer ${adminToken}`)
+    .send({ code: code ?? `TST-${suffix()}`, name: "Materia de prueba" });
+  if (res.status !== 201) throw new Error(`createTestSubject failed: ${JSON.stringify(res.body)}`);
+  return res.body.subject;
+}
+
+export async function createTestTeacher(adminToken: string, code?: string): Promise<Teacher> {
+  const s = suffix();
+  const res = await testRequest()
+    .post("/api/teachers")
+    .set("Authorization", `Bearer ${adminToken}`)
+    .send({ code: code ?? `tst-${s}`, name: "Docente De Prueba", email: `${s}@test.local` });
+  if (res.status !== 201) throw new Error(`createTestTeacher failed: ${JSON.stringify(res.body)}`);
+  return res.body.teacher;
+}
+
+export async function createTestOffering(
+  adminToken: string,
+  opts: { semesterId: string; subjectId?: string; teacherId?: string | null; section?: string; type?: "CLASE" | "EXTRACURRICULAR" | "ACTIVIDAD" }
+): Promise<CourseOffering> {
+  const subjectId = opts.subjectId ?? (await createTestSubject(adminToken)).id;
+  const teacherId = opts.teacherId === undefined ? (await createTestTeacher(adminToken)).id : opts.teacherId;
+  const res = await testRequest()
+    .post("/api/course-offerings")
+    .set("Authorization", `Bearer ${adminToken}`)
+    .send({
+      semesterId: opts.semesterId,
+      subjectId,
+      teacherId: teacherId ?? null,
+      section: opts.section ?? "A",
+      type: opts.type ?? "CLASE",
+    });
+  if (res.status !== 201) throw new Error(`createTestOffering failed: ${JSON.stringify(res.body)}`);
+  return res.body.offering;
 }

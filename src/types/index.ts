@@ -1,6 +1,7 @@
 export type UserRole = "ENCARGADO" | "AYUDANTE";
 export type ClassroomType = "LAB_COMPUTACION" | "LAB_GENERAL" | "AULA";
-export type ScheduleType = "CLASE" | "ACTIVIDAD" | "MANTENIMIENTO";
+export type ClassroomStatus = "ACTIVA" | "INACTIVA" | "EN_MANTENIMIENTO" | "FUERA_SERVICIO";
+export type CourseOfferingType = "CLASE" | "EXTRACURRICULAR" | "ACTIVIDAD";
 export type MaintenanceStatus = "REPORTADO" | "EN_PROGRESO" | "COMPLETADO";
 
 export interface User {
@@ -20,7 +21,7 @@ export interface Classroom {
   type: ClassroomType;
   capacity: number | null;
   location: string | null;
-  active: boolean;
+  status: ClassroomStatus;
   createdAt: string;
   updatedAt: string;
 }
@@ -41,16 +42,51 @@ export interface Semester {
   isActive: boolean;
 }
 
+export interface Teacher {
+  id: string;
+  code: string;
+  name: string;
+  email: string | null;
+  active: boolean;
+  createdAt: string;
+  updatedAt: string;
+}
+
+export interface Subject {
+  id: string;
+  code: string;
+  name: string;
+  active: boolean;
+  createdAt: string;
+  updatedAt: string;
+}
+
+export type CourseOfferingSummary = {
+  id: string;
+  semesterId: string;
+  section: string;
+  type: CourseOfferingType;
+  subject: { id: string; code: string; name: string };
+  teacher: { id: string; code: string; name: string } | null;
+};
+
+export interface CourseOffering extends CourseOfferingSummary {
+  note: string | null;
+  active: boolean;
+  createdAt: string;
+  updatedAt: string;
+}
+
 export interface Schedule {
   id: string;
   classroomId: string;
+  classroom: { id: string; code: string; name: string };
   semesterId: string;
   dayOfWeek: number;
   timeSlotId: string;
   timeSlot: TimeSlot;
-  type: ScheduleType;
-  title: string;
-  teacher: string | null;
+  courseOfferingId: string;
+  courseOffering: CourseOfferingSummary;
   note: string | null;
   assignedById: string;
   assignedBy: { id: string; name: string };

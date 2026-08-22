@@ -6,8 +6,12 @@ const DAYS_PER_WEEK = 6;
 export async function getOverview(): Promise<StatsOverview> {
   const [activeSemester, totalClassrooms, classroomsByType, timeSlotCount, pendingMaintenance] = await Promise.all([
     prisma.semester.findFirst({ where: { isActive: true }, select: { id: true, name: true } }),
-    prisma.classroom.count({ where: { active: true } }),
-    prisma.classroom.groupBy({ by: ["type"], where: { active: true }, _count: { type: true } }),
+    prisma.classroom.count({ where: { status: { not: "INACTIVA" } } }),
+    prisma.classroom.groupBy({
+      by: ["type"],
+      where: { status: { not: "INACTIVA" } },
+      _count: { type: true },
+    }),
     prisma.timeSlot.count(),
     prisma.maintenanceLog.count({ where: { status: { not: "COMPLETADO" } } }),
   ]);
@@ -24,14 +28,17 @@ export async function getOverview(): Promise<StatsOverview> {
 }
 
 async function getOccupancyData(activeSemesterId: string | undefined, totalSlots: number) {
-  const classrooms = await prisma.classroom.findMany({ where: { active: true }, select: { id: true, code: true, name: true } });
+  const classrooms = await prisma.classroom.findMany({
+    where: { status: { not: "INACTIVA" } },
+    select: { id: true, code: true, name: true },
+  });
 
   if (!activeSemesterId) {
     return classrooms.map(c => ({ classroom: c, occupiedSlots: 0, totalSlots, percentage: 0 }));
   }
 
   const schedules = await prisma.schedule.findMany({
-    where: { semesterId: activeSemesterId, type: { in: ["CLASE", "ACTIVIDAD"] } },
+    where: { semesterId: activeSemesterId },
     select: { classroomId: true },
   });
   const occupiedByClassroom = new Map<string, number>();
