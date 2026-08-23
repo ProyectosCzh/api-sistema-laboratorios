@@ -77,6 +77,59 @@ Reglas de capas (obligatorias):
 
 ---
 
+## Flujo típico de uso
+
+Secuencia común de llamadas para operar la grilla de horarios:
+
+```mermaid
+sequenceDiagram
+    participant F as Frontend
+    participant A as API
+
+    Note over F,A: 1. Autenticación
+    F->>A: POST /api/auth/login {email, password}
+    A-->>F: 200 {token, user}
+    F->>F: Guarda token → Authorization: Bearer <token>
+
+    Note over F,A: 2. Carga inicial (catálogos estáticos)
+    F->>A: GET /api/time-slots
+    F->>A: GET /api/classrooms
+    F->>A: GET /api/semesters
+    A-->>F: {timeSlots: [...]}, {classrooms: [...]}, {semesters: [...]}
+
+    Note over F,A: 3. Configuración (solo ENCARGADO)
+    Encargado->>A: POST /api/subjects {code, name}
+    Encargado->>A: POST /api/teachers {code, name, email?}
+    Encargado->>A: POST /api/course-offerings {semesterId, subjectId, section, teacherId?, type?}
+    Encargado->>A: POST /api/semesters/:id/activate
+
+    Note over F,A: 4. Operación diaria (AYUDANTE / ENCARGADO)
+    Ayudante->>A: GET /api/schedules?classroomId=X&semesterId=Y
+    A-->>Ayudante: 200 {schedules: [{courseOffering: {subject, teacher, section, type}, timeSlot, classroom, ...}]}
+
+    Ayudante->>A: POST /api/schedules {classroomId, semesterId, courseOfferingId, dayOfWeek, timeSlotId, note?}
+    alt Éxito
+        A-->>Ayudante: 201 {schedule}
+    else Conflicto
+        A-->>Ayudante: 409 {error: {code: "RESERVATION_CONFLICT" | "TEACHER_CONFLICT" | "OFFERING_CONFLICT" | "CLASSROOM_UNAVAILABLE"}}
+    end
+
+    Note over F,A: 5. Mantenimiento
+    Ayudante->>A: POST /api/maintenance {classroomId, date, reason}
+    A-->>Ayudante: 201 {maintenance}  (aula → EN_MANTENIMIENTO)
+    Encargado->>A: PATCH /api/maintenance/:id {status: "COMPLETADO"}
+    A-->>Encargado: 200 {maintenance}  (aula → ACTIVA si no hay más abiertos)
+
+    Note over F,A: 6. Bitácora y stats
+    F->>A: POST /api/annotations {classroomId, content}
+    F->>A: GET /api/stats/overview
+    A-->>F: StatsOverview {occupancyByClassroom, pendingMaintenance, ...}
+```
+
+> **Nota**: Los endpoints de escritura (`POST/PATCH/DELETE`) validan permisos según rol y autoría (ver [Matriz de acceso](#matriz-de-acceso-por-endpoint)). Todos los errores siguen el formato `{ "error": { "code", "message", "details?" } }`.
+
+---
+
 ## Requisitos y puesta en marcha
 
 - Node.js 20 LTS o superior.
