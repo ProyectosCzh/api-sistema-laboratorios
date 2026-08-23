@@ -14,11 +14,62 @@ import {
 
 const prisma = new PrismaClient();
 
-function offeringSlug(subjectCode: string, section: string, teacherCode?: string): string {
-  const sanitize = (s: string) => s.toLowerCase().replace(/[^a-z0-9]+/g, "-").replace(/^-|-$/g, "");
-  const parts = ["off", subjectCode, section];
-  if (teacherCode) parts.push(teacherCode);
-  return parts.map(sanitize).join("-");
+interface ValidatedBlock {
+  classroomId: string;
+  subjectId: string;
+  teacherId: string | null;
+  dayOfWeek: number;
+  timeSlotId: string;
+}
+
+/**
+ * Valida el dataset antes de escribir:
+ * - referencias existentes (aulas, turnos, materias, docentes)
+ * - celdas únicas por aula+semestre+día+turno
+ * - sin conflicto de docente (mismo docente en dos aulas, mismo día y turno)
+ */
+function validateBlocks(lookups: {
+  classroomIds: Map<string, string>;
+  timeSlotIds: Map<number, string>;
+  subjectIds: Map<string, string>;
+  teacherIds: Map<string, string>;
+}): ValidatedBlock[] {
+  const cellKeys = new Set<string>();
+  const teacherCells = new Set<string>();
+  const validated: ValidatedBlock[] = [];
+
+  for (const b of BLOCKS) {
+    const classroomId = lookups.classroomIds.get(b.classroomCode);
+    if (!classroomId) throw new Error(`Aula inexistente en bloque: ${b.classroomCode}`);
+
+    const timeSlotId = lookups.timeSlotIds.get(b.timeSlotOrder);
+    if (!timeSlotId) throw new Error(`Turno inexistente en bloque: orden ${b.timeSlotOrder}`);
+
+    const subjectId = lookups.subjectIds.get(b.subjectCode);
+    if (!subjectId) throw new Error(`Materia inexistente en bloque: ${b.subjectCode}`);
+
+    let teacherId: string | null = null;
+    if (b.teacherCode) {
+      teacherId = lookups.teacherIds.get(b.teacherCode) ?? null;
+      if (!teacherId) throw new Error(`Docente inexistente en bloque: ${b.teacherCode}`);
+    }
+
+    const cellKey = `${b.classroomCode}|${b.dayOfWeek}|${b.timeSlotOrder}`;
+    if (cellKeys.has(cellKey)) throw new Error(`Bloque duplicado en la misma celda del seed: ${cellKey}`);
+    cellKeys.add(cellKey);
+
+    if (teacherId) {
+      const teacherCellKey = `${b.teacherCode}|${b.dayOfWeek}|${b.timeSlotOrder}`;
+      if (teacherCells.has(teacherCellKey)) {
+        throw new Error(`Docente ${b.teacherCode} asignado dos veces el día ${b.dayOfWeek} turno ${b.timeSlotOrder}`);
+      }
+      teacherCells.add(teacherCellKey);
+    }
+
+    validated.push({ classroomId, subjectId, teacherId, dayOfWeek: b.dayOfWeek, timeSlotId });
+  }
+
+  return validated;
 }
 
 async function main() {
@@ -53,107 +104,59 @@ async function main() {
 
   await prisma.semester.upsert({
     where: { id: SEMESTER.id },
-    update: { isActive: true },
+    update: { isActive: true, workingDays: SEMESTER.workingDays },
     create: { ...SEMESTER, isActive: true },
   });
-  console.log(`✔ Semestre ${SEMESTER.name} activado`);
+  console.log(`✔ Semestre ${SEMESTER.name} activado (días hábiles: ${SEMESTER.workingDays.join(", ")})`);
 
   for (const teacher of TEACHERS) {
     await prisma.teacher.upsert({ where: { code: teacher.code }, update: { ...teacher }, create: { ...teacher } });
   }
   console.log(`✔ ${TEACHERS.length} docentes cargados`);
 
-  for (const { type: _subjectType, ...subject } of SUBJECTS) {
+  for (const subject of SUBJECTS) {
     await prisma.subject.upsert({ where: { code: subject.code }, update: { ...subject }, create: { ...subject } });
   }
   console.log(`✔ ${SUBJECTS.length} materias cargadas`);
 
-  const subjectByCode = new Map(SUBJECTS.map(s => [s.code, s]));
-  const teacherByCode = new Map(TEACHERS.map(t => [t.code, t]));
-  const classroomByCode = new Map(CLASSROOMS.map(c => [c.code, c]));
-  const slotByOrder = new Map(TIME_SLOTS.map(t => [t.order, t]));
+  const [classroomRows, slotRows, subjectRows, teacherRows] = await Promise.all([
+    prisma.classroom.findMany({ select: { id: true, code: true } }),
+    prisma.timeSlot.findMany({ select: { id: true, order: true } }),
+    prisma.subject.findMany({ select: { id: true, code: true } }),
+    prisma.teacher.findMany({ select: { id: true, code: true } }),
+  ]);
 
-  for (const b of BLOCKS) {
-    if (!classroomByCode.has(b.classroomCode)) throw new Error(`Aula inexistente en bloque: ${b.classroomCode}`);
-    if (!slotByOrder.has(b.timeSlotOrder)) throw new Error(`Turno inexistente en bloque: ${b.timeSlotOrder}`);
-    if (!subjectByCode.has(b.subjectCode)) throw new Error(`Materia inexistente en bloque: ${b.subjectCode}`);
-    if (b.teacherCode && !teacherByCode.has(b.teacherCode)) throw new Error(`Docente inexistente en bloque: ${b.teacherCode}`);
-  }
+  const validatedBlocks = validateBlocks({
+    classroomIds: new Map(classroomRows.map(c => [c.code, c.id])),
+    timeSlotIds: new Map(slotRows.map(s => [s.order, s.id])),
+    subjectIds: new Map(subjectRows.map(s => [s.code, s.id])),
+    teacherIds: new Map(teacherRows.map(t => [t.code, t.id])),
+  });
+  console.log(`✔ ${validatedBlocks.length} bloques validados (celdas y docentes sin conflictos)`);
 
-  const cellKeys = new Set(BLOCKS.map(b => `${b.classroomCode}|${b.dayOfWeek}|${b.timeSlotOrder}`));
-  if (cellKeys.size !== BLOCKS.length) throw new Error("Bloques duplicados en la misma celda del seed");
-
-  interface OfferingDerived {
-    id: string;
-    semesterId: string;
-    subjectId: string;
-    teacherId: string | null;
-    section: string;
-    type: string;
-  }
-
-  const offerings = new Map<string, OfferingDerived>();
-  for (const b of BLOCKS) {
-    const subject = subjectByCode.get(b.subjectCode)!;
-    const teacher = b.teacherCode ? teacherByCode.get(b.teacherCode)! : null;
-    const key = `${b.subjectCode}|${b.section}|${teacher?.code ?? ""}`;
-    if (!offerings.has(key)) {
-      offerings.set(key, {
-        id: offeringSlug(b.subjectCode, b.section, teacher?.code),
-        semesterId: SEMESTER.id,
-        subjectId: subject.id,
-        teacherId: teacher?.id ?? null,
-        section: b.section.toUpperCase(),
-        type: subject.type,
-      });
-    }
-  }
-
-  for (const o of offerings.values()) {
-    const existing = await prisma.courseOffering.findFirst({
-      where: { semesterId: o.semesterId, subjectId: o.subjectId, section: o.section, teacherId: o.teacherId },
-      select: { id: true },
-    });
-    if (existing) {
-      await prisma.courseOffering.update({ where: { id: existing.id }, data: { ...o, active: true } });
-    } else {
-      await prisma.courseOffering.create({ data: o });
-    }
-  }
-  console.log(`✔ ${offerings.size} comisiones cargadas`);
-
-  const offeringByKey = new Map<string, OfferingDerived>();
-  for (const [key, o] of offerings.entries()) offeringByKey.set(key, o);
-
-  let createdBlocks = 0;
-  for (const b of BLOCKS) {
-    const classroom = classroomByCode.get(b.classroomCode)!;
-    const slot = slotByOrder.get(b.timeSlotOrder)!;
-    const teacher = b.teacherCode ? teacherByCode.get(b.teacherCode)! : null;
-    const offering = offeringByKey.get(`${b.subjectCode}|${b.section}|${teacher?.code ?? ""}`)!;
-
+  for (const block of validatedBlocks) {
     await prisma.schedule.upsert({
       where: {
         classroomId_semesterId_dayOfWeek_timeSlotId: {
-          classroomId: classroom.id,
+          classroomId: block.classroomId,
           semesterId: SEMESTER.id,
-          dayOfWeek: b.dayOfWeek,
-          timeSlotId: slot.id,
+          dayOfWeek: block.dayOfWeek,
+          timeSlotId: block.timeSlotId,
         },
       },
-      update: { courseOfferingId: offering.id },
+      update: { subjectId: block.subjectId, teacherId: block.teacherId },
       create: {
-        classroomId: classroom.id,
+        classroomId: block.classroomId,
         semesterId: SEMESTER.id,
-        courseOfferingId: offering.id,
-        dayOfWeek: b.dayOfWeek,
-        timeSlotId: slot.id,
+        subjectId: block.subjectId,
+        teacherId: block.teacherId,
+        dayOfWeek: block.dayOfWeek,
+        timeSlotId: block.timeSlotId,
         assignedById: ADMIN.id,
       },
     });
-    createdBlocks++;
   }
-  console.log(`✔ ${createdBlocks} bloques de horario cargados`);
+  console.log(`✔ ${validatedBlocks.length} bloques de horario cargados`);
 
   const [totalClassrooms, totalTeachers, totalSubjects, totalSlots, totalSchedules] = await Promise.all([
     prisma.classroom.count(),
