@@ -2,12 +2,29 @@ import { Request, Response, NextFunction } from "express";
 import { ZodError } from "zod";
 import { Prisma } from "@prisma/client";
 import { ApiError, ApiErrors } from "../utils/errors";
+import { uniqueViolationColumns } from "../utils/dbErrors";
 
 function toBody(err: ApiError) {
   return { error: { code: err.code, message: err.message, ...(err.details ? { details: err.details } : {}) } };
 }
 
-export function errorHandler(err: Error, _req: Request, res: Response, _next: NextFunction) {
+function mapUniqueTarget(target: string[]): ApiError | null {
+  const field = target.join(",");
+  if (field.includes("email")) return ApiErrors.emailInUse();
+  if (field.includes("code")) return ApiErrors.classroomCodeInUse();
+  if (field.includes("order")) return ApiErrors.timeSlotOrderInUse();
+  if (
+    field.includes("classroomId") &&
+    field.includes("semesterId") &&
+    field.includes("dayOfWeek") &&
+    field.includes("timeSlotId")
+  ) {
+    return ApiErrors.reservationConflict();
+  }
+  return null;
+}
+
+export function errorHandler(err: Error, req: Request, res: Response, _next: NextFunction) {
   if (err instanceof ZodError) {
     const details = err.issues.map(i => ({
       field: i.path.join("."),
@@ -22,14 +39,10 @@ export function errorHandler(err: Error, _req: Request, res: Response, _next: Ne
 
   if (err instanceof Prisma.PrismaClientKnownRequestError) {
     if (err.code === "P2002") {
-      const target = err.meta?.target;
-      if (Array.isArray(target)) {
-        const field = target.join(",");
-        if (field.includes("email")) return res.status(409).json(toBody(ApiErrors.emailInUse()));
-        if (field.includes("code")) return res.status(409).json(toBody(ApiErrors.classroomCodeInUse()));
-        if (field.includes("classroomId") && field.includes("semesterId") && field.includes("dayOfWeek") && field.includes("timeSlotId")) {
-          return res.status(409).json(toBody(ApiErrors.reservationConflict()));
-        }
+      const target = uniqueViolationColumns(err);
+      if (target) {
+        const mapped = mapUniqueTarget(target);
+        if (mapped) return res.status(mapped.status).json(toBody(mapped));
       }
       return res.status(409).json(toBody(ApiErrors.conflict()));
     }
@@ -41,7 +54,7 @@ export function errorHandler(err: Error, _req: Request, res: Response, _next: Ne
     }
   }
 
-  console.error("Unhandled error:", err);
+  console.error(`[ERROR] ${req.method} ${req.originalUrl}`, err);
   return res.status(500).json(toBody(ApiErrors.internal()));
 }
 

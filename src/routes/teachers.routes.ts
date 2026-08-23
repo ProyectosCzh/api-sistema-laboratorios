@@ -1,71 +1,74 @@
 import { Router } from "express";
-import { z } from "zod";
-import { validate } from "../middleware/validate";
 import { requireAuth, requireRole } from "../middleware/auth";
+import { validateBody, validateParams, validateQuery, getQuery, getParams } from "../middleware/validate";
+import { ok, paginated, noContent } from "../utils/responses";
 import * as teacherService from "../services/teacher.service";
+import type { ListTeachersQuery, CreateTeacherInput, UpdateTeacherInput } from "../validators/teacher.schema";
+import type { ListTeachersOptions } from "../services/teacher.service";
+import * as validators from "../validators/teacher.schema";
 
 const router = Router();
 
-const listTeachersSchema = z.object({
-  includeInactive: z.enum(["true", "false"]).optional(),
-});
-
-router.get("/", requireAuth, validate(listTeachersSchema, "query"), async (req, res, next) => {
+router.get("/", requireAuth, validateQuery(validators.listTeachersQuerySchema), async (req, res, next) => {
   try {
-    const includeInactive = req.user!.role === "ENCARGADO" && req.query.includeInactive === "true";
-    const teachers = await teacherService.listTeachers(includeInactive);
-    res.status(200).json({ teachers });
+    const query = getQuery<ListTeachersQuery>(req);
+    const includeInactive = req.user!.role === "ENCARGADO" && query.includeInactive === "true";
+    const opts: ListTeachersOptions = {
+      includeInactive,
+      q: query.q,
+      page: query.page,
+      pageSize: query.pageSize,
+    };
+    const result = await teacherService.listTeachers(opts);
+    paginated(res, result.items, result.meta);
   } catch (e) {
     next(e);
   }
 });
 
-router.get("/:id", requireAuth, validate(z.object({ id: z.string().min(1) }), "params"), async (req, res, next) => {
+router.get("/:id", requireAuth, validateParams(validators.idParamsSchema), async (req, res, next) => {
   try {
-    const teacher = await teacherService.getTeacher(req.params.id as string);
-    res.status(200).json({ teacher });
+    const { id } = getParams(req);
+    const teacher = await teacherService.getTeacher(id);
+    ok(res, { teacher }, 200);
   } catch (e) {
     next(e);
   }
 });
 
-const createTeacherSchema = z.object({
-  code: z.string().min(2).max(30).transform(s => s.trim().toUpperCase()),
-  name: z.string().min(2).max(120).trim(),
-  email: z.string().email().nullish(),
-});
-
-router.post("/", requireAuth, requireRole("ENCARGADO"), validate(createTeacherSchema), async (req, res, next) => {
+router.post("/", requireAuth, requireRole("ENCARGADO"), validateBody(validators.createTeacherSchema), async (req, res, next) => {
   try {
-    const teacher = await teacherService.createTeacher(req.body);
-    res.status(201).json({ teacher });
+    const body = getBody<CreateTeacherInput>(req);
+    const teacher = await teacherService.createTeacher(body);
+    ok(res, { teacher }, 201);
   } catch (e) {
     next(e);
   }
 });
 
-const updateTeacherSchema = z.object({
-  name: z.string().min(2).max(120).trim().optional(),
-  email: z.string().email().nullish().optional(),
-  active: z.boolean().optional(),
-}).refine(obj => Object.keys(obj).length > 0, { message: "Al menos un campo requerido" });
-
-router.patch("/:id", requireAuth, requireRole("ENCARGADO"), validate(updateTeacherSchema), validate(z.object({ id: z.string().min(1) }), "params"), async (req, res, next) => {
+router.patch("/:id", requireAuth, requireRole("ENCARGADO"), validateParams(validators.idParamsSchema), validateBody(validators.updateTeacherSchema), async (req, res, next) => {
   try {
-    const teacher = await teacherService.updateTeacher(req.params.id as string, req.body);
-    res.status(200).json({ teacher });
+    const { id } = getParams(req);
+    const body = getBody<UpdateTeacherInput>(req);
+    const teacher = await teacherService.updateTeacher(id, body);
+    ok(res, { teacher }, 200);
   } catch (e) {
     next(e);
   }
 });
 
-router.delete("/:id", requireAuth, requireRole("ENCARGADO"), validate(z.object({ id: z.string().min(1) }), "params"), async (req, res, next) => {
+router.delete("/:id", requireAuth, requireRole("ENCARGADO"), validateParams(validators.idParamsSchema), async (req, res, next) => {
   try {
-    await teacherService.deleteTeacher(req.params.id as string);
-    res.status(200).json({ ok: true });
+    const { id } = getParams(req);
+    await teacherService.deleteTeacher(id);
+    noContent(res);
   } catch (e) {
     next(e);
   }
 });
+
+function getBody<T>(req: import("express").Request): T {
+  return req.validated?.body as T;
+}
 
 export default router;

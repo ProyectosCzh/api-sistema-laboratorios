@@ -1,6 +1,7 @@
 import { prisma } from "../lib/prisma";
 import { isUniqueViolationOn } from "../utils/dbErrors";
 import { ApiErrors } from "../utils/errors";
+import { buildMeta, buildPagination, PaginatedResult } from "../utils/pagination";
 import type { CourseOffering, CourseOfferingSummary, CourseOfferingType } from "../types";
 
 const OFFERING_INCLUDE = {
@@ -8,24 +9,37 @@ const OFFERING_INCLUDE = {
   teacher: { select: { id: true, code: true, name: true } },
 } as const;
 
-export async function listOfferings(filters: {
+export interface ListOfferingsOptions {
   semesterId?: string;
   subjectId?: string;
   teacherId?: string;
   includeInactive?: boolean;
-}): Promise<CourseOffering[]> {
-  const where: Record<string, unknown> = {};
-  if (filters.semesterId) where.semesterId = filters.semesterId;
-  if (filters.subjectId) where.subjectId = filters.subjectId;
-  if (filters.teacherId) where.teacherId = filters.teacherId;
-  if (!filters.includeInactive) where.active = true;
+  page: number;
+  pageSize: number;
+}
 
-  const offerings = await prisma.courseOffering.findMany({
-    where,
-    include: OFFERING_INCLUDE,
-    orderBy: [{ subject: { code: "asc" } }, { section: "asc" }],
-  });
-  return offerings.map(toOffering);
+export async function listOfferings(filters: ListOfferingsOptions): Promise<PaginatedResult<CourseOffering>> {
+  const { page, pageSize, ...whereFilters } = filters;
+  const { skip, take } = buildPagination(page, pageSize);
+
+  const where: Record<string, unknown> = {};
+  if (whereFilters.semesterId) where.semesterId = whereFilters.semesterId;
+  if (whereFilters.subjectId) where.subjectId = whereFilters.subjectId;
+  if (whereFilters.teacherId) where.teacherId = whereFilters.teacherId;
+  if (!whereFilters.includeInactive) where.active = true;
+
+  const [offerings, total] = await Promise.all([
+    prisma.courseOffering.findMany({
+      where,
+      include: OFFERING_INCLUDE,
+      orderBy: [{ subject: { code: "asc" } }, { section: "asc" }],
+      skip,
+      take,
+    }),
+    prisma.courseOffering.count({ where }),
+  ]);
+
+  return { items: offerings.map(toOffering), meta: buildMeta(total, page, pageSize) };
 }
 
 export async function getOffering(id: string): Promise<CourseOffering> {

@@ -43,6 +43,26 @@ export const ApiErrors = {
   semesterMismatch: () =>
     new ApiError(400, "SEMESTER_MISMATCH", "La comisión no pertenece al semestre indicado"),
   conflict: () => new ApiError(409, "CONFLICT", "Conflicto con un recurso existente"),
+  currentPasswordInvalid: () =>
+    new ApiError(400, "CURRENT_PASSWORD_INVALID", "La contraseña actual es incorrecta"),
+  semesterHasDependencies: () =>
+    new ApiError(
+      409,
+      "SEMESTER_HAS_DEPENDENCIES",
+      "No se puede eliminar el semestre porque tiene comisiones u horarios asociados"
+    ),
+  semesterActive: () =>
+    new ApiError(409, "SEMESTER_ACTIVE", "No se puede eliminar el semestre activo; desactivá otro primero"),
+  timeSlotInUse: () =>
+    new ApiError(
+      409,
+      "TIME_SLOT_IN_USE",
+      "No se puede eliminar el turno porque tiene horarios asociados"
+    ),
+  timeSlotOrderInUse: () =>
+    new ApiError(409, "TIME_SLOT_ORDER_IN_USE", "Ya existe un turno con ese orden"),
+  serviceUnavailable: (message = "Servicio temporalmente no disponible") =>
+    new ApiError(503, "SERVICE_UNAVAILABLE", message),
   rateLimited: () => new ApiError(429, "RATE_LIMIT_EXCEEDED", "Demasiados intentos, intentá de nuevo más tarde"),
   internal: (message = "Ocurrió un error inesperado, intentá de nuevo") => new ApiError(500, "INTERNAL_ERROR", message),
 };

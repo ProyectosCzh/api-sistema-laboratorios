@@ -1,14 +1,39 @@
+import { Prisma } from "@prisma/client";
 import { prisma } from "../lib/prisma";
 import { isUniqueViolationOn } from "../utils/dbErrors";
 import { ApiErrors } from "../utils/errors";
+import { buildMeta, buildPagination, PaginatedResult } from "../utils/pagination";
 import type { Teacher } from "../types";
 
-export async function listTeachers(includeInactive: boolean): Promise<Teacher[]> {
-  const teachers = await prisma.teacher.findMany({
-    where: includeInactive ? {} : { active: true },
-    orderBy: { name: "asc" },
-  });
-  return teachers.map(toTeacher);
+export interface ListTeachersOptions {
+  includeInactive: boolean;
+  q?: string;
+  page: number;
+  pageSize: number;
+}
+
+export async function listTeachers(opts: ListTeachersOptions): Promise<PaginatedResult<Teacher>> {
+  const { skip, take } = buildPagination(opts.page, opts.pageSize);
+
+  const where: Prisma.TeacherWhereInput = {
+    ...(opts.includeInactive ? {} : { active: true }),
+    ...(opts.q
+      ? {
+          OR: [
+            { code: { contains: opts.q, mode: "insensitive" } },
+            { name: { contains: opts.q, mode: "insensitive" } },
+            { email: { contains: opts.q, mode: "insensitive" } },
+          ],
+        }
+      : {}),
+  };
+
+  const [teachers, total] = await Promise.all([
+    prisma.teacher.findMany({ where, orderBy: { name: "asc" }, skip, take }),
+    prisma.teacher.count({ where }),
+  ]);
+
+  return { items: teachers.map(toTeacher), meta: buildMeta(total, opts.page, opts.pageSize) };
 }
 
 export async function getTeacher(id: string): Promise<Teacher> {

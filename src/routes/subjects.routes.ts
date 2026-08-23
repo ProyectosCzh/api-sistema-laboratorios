@@ -1,69 +1,74 @@
 import { Router } from "express";
-import { z } from "zod";
-import { validate } from "../middleware/validate";
 import { requireAuth, requireRole } from "../middleware/auth";
+import { validateBody, validateParams, validateQuery, getQuery, getParams } from "../middleware/validate";
+import { ok, paginated, noContent } from "../utils/responses";
 import * as subjectService from "../services/subject.service";
+import type { ListSubjectsQuery, CreateSubjectInput, UpdateSubjectInput } from "../validators/subject.schema";
+import type { ListSubjectsOptions } from "../services/subject.service";
+import * as validators from "../validators/subject.schema";
 
 const router = Router();
 
-const listSubjectsSchema = z.object({
-  includeInactive: z.enum(["true", "false"]).optional(),
-});
-
-router.get("/", requireAuth, validate(listSubjectsSchema, "query"), async (req, res, next) => {
+router.get("/", requireAuth, validateQuery(validators.listSubjectsQuerySchema), async (req, res, next) => {
   try {
-    const includeInactive = req.user!.role === "ENCARGADO" && req.query.includeInactive === "true";
-    const subjects = await subjectService.listSubjects(includeInactive);
-    res.status(200).json({ subjects });
+    const query = getQuery<ListSubjectsQuery>(req);
+    const includeInactive = req.user!.role === "ENCARGADO" && query.includeInactive === "true";
+    const opts: ListSubjectsOptions = {
+      includeInactive,
+      q: query.q,
+      page: query.page,
+      pageSize: query.pageSize,
+    };
+    const result = await subjectService.listSubjects(opts);
+    paginated(res, result.items, result.meta);
   } catch (e) {
     next(e);
   }
 });
 
-router.get("/:id", requireAuth, validate(z.object({ id: z.string().min(1) }), "params"), async (req, res, next) => {
+router.get("/:id", requireAuth, validateParams(validators.idParamsSchema), async (req, res, next) => {
   try {
-    const subject = await subjectService.getSubject(req.params.id as string);
-    res.status(200).json({ subject });
+    const { id } = getParams(req);
+    const subject = await subjectService.getSubject(id);
+    ok(res, { subject }, 200);
   } catch (e) {
     next(e);
   }
 });
 
-const createSubjectSchema = z.object({
-  code: z.string().min(2).max(20).transform(s => s.trim().toUpperCase()),
-  name: z.string().min(2).max(120).trim(),
-});
-
-router.post("/", requireAuth, requireRole("ENCARGADO"), validate(createSubjectSchema), async (req, res, next) => {
+router.post("/", requireAuth, requireRole("ENCARGADO"), validateBody(validators.createSubjectSchema), async (req, res, next) => {
   try {
-    const subject = await subjectService.createSubject(req.body);
-    res.status(201).json({ subject });
+    const body = getBody<CreateSubjectInput>(req);
+    const subject = await subjectService.createSubject(body);
+    ok(res, { subject }, 201);
   } catch (e) {
     next(e);
   }
 });
 
-const updateSubjectSchema = z.object({
-  name: z.string().min(2).max(120).trim().optional(),
-  active: z.boolean().optional(),
-}).refine(obj => Object.keys(obj).length > 0, { message: "Al menos un campo requerido" });
-
-router.patch("/:id", requireAuth, requireRole("ENCARGADO"), validate(updateSubjectSchema), validate(z.object({ id: z.string().min(1) }), "params"), async (req, res, next) => {
+router.patch("/:id", requireAuth, requireRole("ENCARGADO"), validateParams(validators.idParamsSchema), validateBody(validators.updateSubjectSchema), async (req, res, next) => {
   try {
-    const subject = await subjectService.updateSubject(req.params.id as string, req.body);
-    res.status(200).json({ subject });
+    const { id } = getParams(req);
+    const body = getBody<UpdateSubjectInput>(req);
+    const subject = await subjectService.updateSubject(id, body);
+    ok(res, { subject }, 200);
   } catch (e) {
     next(e);
   }
 });
 
-router.delete("/:id", requireAuth, requireRole("ENCARGADO"), validate(z.object({ id: z.string().min(1) }), "params"), async (req, res, next) => {
+router.delete("/:id", requireAuth, requireRole("ENCARGADO"), validateParams(validators.idParamsSchema), async (req, res, next) => {
   try {
-    await subjectService.deleteSubject(req.params.id as string);
-    res.status(200).json({ ok: true });
+    const { id } = getParams(req);
+    await subjectService.deleteSubject(id);
+    noContent(res);
   } catch (e) {
     next(e);
   }
 });
+
+function getBody<T>(req: import("express").Request): T {
+  return req.validated?.body as T;
+}
 
 export default router;

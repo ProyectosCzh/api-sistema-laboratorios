@@ -131,6 +131,19 @@ export interface AuthResponse {
   user: User;
 }
 
+export interface PaginationMeta {
+  page: number;
+  pageSize: number;
+  total: number;
+  totalPages: number;
+}
+
+export interface HealthStatus {
+  status: "ok";
+  db: "up" | "down";
+  uptime: number;
+}
+
 export interface ErrorResponse {
   error: {
     code: string;

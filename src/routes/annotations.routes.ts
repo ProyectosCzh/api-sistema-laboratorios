@@ -1,51 +1,73 @@
 import { Router } from "express";
-import { z } from "zod";
-import { validate } from "../middleware/validate";
 import { requireAuth } from "../middleware/auth";
+import { validateBody, validateParams, validateQuery, getQuery, getParams } from "../middleware/validate";
+import { ok, paginated, noContent } from "../utils/responses";
 import * as annotationService from "../services/annotation.service";
+import type { ListAnnotationsQuery, CreateAnnotationInput, UpdateAnnotationInput } from "../validators/annotation.schema";
+import * as validators from "../validators/annotation.schema";
 
 const router = Router();
 
-const listAnnotationsSchema = z.object({
-  classroomId: z.string().min(1),
-  from: z.coerce.date().optional(),
-  to: z.coerce.date().optional(),
-});
-
-router.get("/", requireAuth, validate(listAnnotationsSchema, "query"), async (req, res, next) => {
+router.get("/", requireAuth, validateQuery(validators.listAnnotationsQuerySchema), async (req, res, next) => {
   try {
-    const annotations = await annotationService.listAnnotations(
-      req.query.classroomId as string,
-      req.query.from ? new Date(req.query.from as string) : undefined,
-      req.query.to ? new Date(req.query.to as string) : undefined
-    );
-    res.status(200).json({ annotations });
+    const query = getQuery<ListAnnotationsQuery>(req);
+    const opts = {
+      classroomId: query.classroomId,
+      from: query.from,
+      to: query.to,
+      page: query.page,
+      pageSize: query.pageSize,
+    };
+    const result = await annotationService.listAnnotations(opts);
+    paginated(res, result.items, result.meta);
   } catch (e) {
     next(e);
   }
 });
 
-const createAnnotationSchema = z.object({
-  classroomId: z.string().min(1),
-  content: z.string().min(1).max(1000).trim(),
-});
-
-router.post("/", requireAuth, validate(createAnnotationSchema), async (req, res, next) => {
+router.get("/:id", requireAuth, validateParams(validators.idParamsSchema), async (req, res, next) => {
   try {
-    const annotation = await annotationService.createAnnotation(req.body.classroomId, req.body.content, req.user!.id);
-    res.status(201).json({ annotation });
+    const { id } = getParams(req);
+    const annotation = await annotationService.getAnnotation(id);
+    ok(res, { annotation }, 200);
   } catch (e) {
     next(e);
   }
 });
 
-router.delete("/:id", requireAuth, validate(z.object({ id: z.string().min(1) }), "params"), async (req, res, next) => {
+router.post("/", requireAuth, validateBody(validators.createAnnotationSchema), async (req, res, next) => {
   try {
-    await annotationService.deleteAnnotation(req.params.id as string, req.user!.id, req.user!.role);
-    res.status(200).json({ ok: true });
+    const body = getBody<CreateAnnotationInput>(req);
+    const annotation = await annotationService.createAnnotation(body.classroomId, body.content, req.user!.id);
+    ok(res, { annotation }, 201);
   } catch (e) {
     next(e);
   }
 });
+
+router.patch("/:id", requireAuth, validateParams(validators.idParamsSchema), validateBody(validators.updateAnnotationSchema), async (req, res, next) => {
+  try {
+    const { id } = getParams(req);
+    const body = getBody<UpdateAnnotationInput>(req);
+    const annotation = await annotationService.updateAnnotation(id, body, req.user!.id, req.user!.role);
+    ok(res, { annotation }, 200);
+  } catch (e) {
+    next(e);
+  }
+});
+
+router.delete("/:id", requireAuth, validateParams(validators.idParamsSchema), async (req, res, next) => {
+  try {
+    const { id } = getParams(req);
+    await annotationService.deleteAnnotation(id, req.user!.id, req.user!.role);
+    noContent(res);
+  } catch (e) {
+    next(e);
+  }
+});
+
+function getBody<T>(req: import("express").Request): T {
+  return req.validated?.body as T;
+}
 
 export default router;

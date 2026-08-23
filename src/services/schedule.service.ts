@@ -115,6 +115,12 @@ export async function listSchedules(classroomId: string, semesterId: string): Pr
   return schedules.map(toSchedule);
 }
 
+export async function getSchedule(id: string): Promise<Schedule> {
+  const schedule = await prisma.schedule.findUnique({ where: { id }, include: SCHEDULE_INCLUDE });
+  if (!schedule) throw ApiErrors.notFound("Horario no encontrado");
+  return toSchedule(schedule);
+}
+
 export async function createSchedule(data: {
   classroomId: string;
   semesterId: string;

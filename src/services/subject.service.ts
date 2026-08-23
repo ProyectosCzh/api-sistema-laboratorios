@@ -1,14 +1,38 @@
+import { Prisma } from "@prisma/client";
 import { prisma } from "../lib/prisma";
 import { isUniqueViolationOn } from "../utils/dbErrors";
 import { ApiErrors } from "../utils/errors";
+import { buildMeta, buildPagination, PaginatedResult } from "../utils/pagination";
 import type { Subject } from "../types";
 
-export async function listSubjects(includeInactive: boolean): Promise<Subject[]> {
-  const subjects = await prisma.subject.findMany({
-    where: includeInactive ? {} : { active: true },
-    orderBy: { code: "asc" },
-  });
-  return subjects.map(toSubject);
+export interface ListSubjectsOptions {
+  includeInactive: boolean;
+  q?: string;
+  page: number;
+  pageSize: number;
+}
+
+export async function listSubjects(opts: ListSubjectsOptions): Promise<PaginatedResult<Subject>> {
+  const { skip, take } = buildPagination(opts.page, opts.pageSize);
+
+  const where: Prisma.SubjectWhereInput = {
+    ...(opts.includeInactive ? {} : { active: true }),
+    ...(opts.q
+      ? {
+          OR: [
+            { code: { contains: opts.q, mode: "insensitive" } },
+            { name: { contains: opts.q, mode: "insensitive" } },
+          ],
+        }
+      : {}),
+  };
+
+  const [subjects, total] = await Promise.all([
+    prisma.subject.findMany({ where, orderBy: { code: "asc" }, skip, take }),
+    prisma.subject.count({ where }),
+  ]);
+
+  return { items: subjects.map(toSubject), meta: buildMeta(total, opts.page, opts.pageSize) };
 }
 
 export async function getSubject(id: string): Promise<Subject> {
