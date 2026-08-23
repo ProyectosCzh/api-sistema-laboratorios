@@ -18,8 +18,12 @@ export const includeInactiveQuerySchema = z.object({
 export const userRoleSchema = z.enum(["ENCARGADO", "AYUDANTE"]);
 export const classroomTypeSchema = z.enum(["LAB_COMPUTACION", "LAB_GENERAL", "AULA"]);
 export const classroomStatusSchema = z.enum(["ACTIVA", "INACTIVA", "EN_MANTENIMIENTO", "FUERA_SERVICIO"]);
-export const offeringTypeSchema = z.enum(["CLASE", "EXTRACURRICULAR", "ACTIVIDAD"]);
 export const maintenanceStatusSchema = z.enum(["REPORTADO", "EN_PROGRESO", "COMPLETADO"]);
+export const reservationTypeSchema = z.enum(["RECURRENTE", "PUNTUAL"]);
+export const reservationStatusSchema = z.enum(["PENDIENTE", "CONFIRMADA", "CANCELADA"]);
+
+/// 1 = Lunes ... 6 = Sábado (semana hábil del documento base)
+export const dayOfWeekSchema = z.coerce.number().int().min(1).max(6);
 
 export const timeStringSchema = z
   .string()

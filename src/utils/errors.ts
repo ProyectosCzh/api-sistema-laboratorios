@@ -35,13 +35,13 @@ export const ApiErrors = {
   subjectCodeInUse: () => new ApiError(409, "SUBJECT_CODE_IN_USE", "Ya existe una materia con ese código"),
   teacherCodeInUse: () => new ApiError(409, "TEACHER_CODE_IN_USE", "Ya existe un docente con ese código"),
   teacherEmailInUse: () => new ApiError(409, "TEACHER_EMAIL_IN_USE", "Ya existe un docente con ese email"),
-  offeringAlreadyExists: () => new ApiError(409, "OFFERING_ALREADY_EXISTS", "Ya existe una comisión de esa materia con esa sección en el semestre"),
-  offeringConflict: () => new ApiError(409, "OFFERING_CONFLICT", "Esa comisión ya tiene un bloque en ese día y turno"),
   teacherConflict: () => new ApiError(409, "TEACHER_CONFLICT", "El docente ya tiene un bloque en ese día y turno"),
   inactiveCatalogItem: (message = "El registro del catálogo está inactivo y no puede utilizarse") =>
     new ApiError(400, "INACTIVE_CATALOG_ITEM", message),
-  semesterMismatch: () =>
-    new ApiError(400, "SEMESTER_MISMATCH", "La comisión no pertenece al semestre indicado"),
+  nonWorkingDay: (message = "El día indicado no es día hábil del semestre") =>
+    new ApiError(400, "NON_WORKING_DAY", message),
+  dateOutsideSemester: () =>
+    new ApiError(400, "DATE_OUTSIDE_SEMESTER", "La fecha indicada está fuera del rango del semestre"),
   conflict: () => new ApiError(409, "CONFLICT", "Conflicto con un recurso existente"),
   currentPasswordInvalid: () =>
     new ApiError(400, "CURRENT_PASSWORD_INVALID", "La contraseña actual es incorrecta"),
@@ -49,8 +49,12 @@ export const ApiErrors = {
     new ApiError(
       409,
       "SEMESTER_HAS_DEPENDENCIES",
-      "No se puede eliminar el semestre porque tiene comisiones u horarios asociados"
+      "No se puede eliminar el semestre porque tiene horarios o reservas asociados"
     ),
+  invalidReservationTransition: () =>
+    new ApiError(409, "INVALID_RESERVATION_TRANSITION", "La reserva no admite esa transición de estado"),
+  reservationNotEditable: () =>
+    new ApiError(409, "RESERVATION_NOT_EDITABLE", "Solo se pueden modificar reservas pendientes"),
   semesterActive: () =>
     new ApiError(409, "SEMESTER_ACTIVE", "No se puede eliminar el semestre activo; desactivá otro primero"),
   timeSlotInUse: () =>

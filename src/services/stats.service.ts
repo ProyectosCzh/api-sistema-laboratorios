@@ -4,17 +4,22 @@ import type { StatsOverview } from "../types";
 const DAYS_PER_WEEK = 6;
 
 export async function getOverview(): Promise<StatsOverview> {
-  const [activeSemester, totalClassrooms, classroomsByType, timeSlotCount, pendingMaintenance] = await Promise.all([
-    prisma.semester.findFirst({ where: { isActive: true }, select: { id: true, name: true } }),
-    prisma.classroom.count({ where: { status: { not: "INACTIVA" } } }),
-    prisma.classroom.groupBy({
-      by: ["type"],
-      where: { status: { not: "INACTIVA" } },
-      _count: { type: true },
-    }),
-    prisma.timeSlot.count(),
-    prisma.maintenanceLog.count({ where: { status: { not: "COMPLETADO" } } }),
-  ]);
+  const [activeSemester, totalClassrooms, classroomsByType, timeSlotCount, pendingMaintenance, reservationsByStatus] =
+    await Promise.all([
+      prisma.semester.findFirst({ where: { isActive: true }, select: { id: true, name: true } }),
+      prisma.classroom.count({ where: { status: { not: "INACTIVA" } } }),
+      prisma.classroom.groupBy({
+        by: ["type"],
+        where: { status: { not: "INACTIVA" } },
+        _count: { type: true },
+      }),
+      prisma.timeSlot.count(),
+      prisma.maintenanceLog.count({ where: { status: { not: "COMPLETADO" } } }),
+      prisma.reservation.groupBy({
+        by: ["status"],
+        _count: { status: true },
+      }),
+    ]);
 
   const totalSlots = timeSlotCount * DAYS_PER_WEEK;
 
@@ -24,6 +29,10 @@ export async function getOverview(): Promise<StatsOverview> {
     activeSemester: activeSemester ? { id: activeSemester.id, name: activeSemester.name } : null,
     occupancyByClassroom: await getOccupancyData(activeSemester?.id, totalSlots),
     pendingMaintenance,
+    reservationsByStatus: reservationsByStatus.map(r => ({
+      status: r.status as "PENDIENTE" | "CONFIRMADA" | "CANCELADA",
+      count: r._count.status,
+    })),
   };
 }
 

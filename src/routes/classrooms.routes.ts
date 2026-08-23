@@ -1,11 +1,18 @@
 import { Router } from "express";
+import { z } from "zod";
 import { requireAuth, requireRole } from "../middleware/auth";
 import { validateBody, validateParams, validateQuery, getQuery, getParams } from "../middleware/validate";
 import { ok, paginated, noContent } from "../utils/responses";
 import * as classroomService from "../services/classroom.service";
+import * as availabilityService from "../services/availability.service";
 import type { ListClassroomsQuery, CreateClassroomInput, UpdateClassroomInput } from "../validators/classroom.schema";
 import type { ListClassroomsOptions } from "../services/classroom.service";
 import * as validators from "../validators/classroom.schema";
+
+const stateQuerySchema = z.object({
+  date: z.coerce.date().optional(),
+  timeSlotId: z.string().min(1).optional(),
+});
 
 const router = Router();
 
@@ -32,6 +39,21 @@ router.get("/:id", requireAuth, validateParams(validators.idParamsSchema), async
     const { id } = getParams(req);
     const classroom = await classroomService.getClassroom(id);
     ok(res, { classroom }, 200);
+  } catch (e) {
+    next(e);
+  }
+});
+
+/// Estado del aula según el documento base: LIBRE | OCUPADA | MANTENIMIENTO.
+router.get("/:id/state", requireAuth, validateParams(validators.idParamsSchema), validateQuery(stateQuerySchema), async (req, res, next) => {
+  try {
+    const { id } = getParams(req);
+    const query = getQuery<{ date?: Date; timeSlotId?: string }>(req);
+    const state = await availabilityService.getClassroomState(id, {
+      date: query.date,
+      timeSlotId: query.timeSlotId,
+    });
+    ok(res, state, 200);
   } catch (e) {
     next(e);
   }

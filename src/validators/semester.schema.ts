@@ -1,5 +1,5 @@
 import { z } from "zod";
-import { paginationSchema } from "./shared.schema";
+import { dayOfWeekSchema, paginationSchema } from "./shared.schema";
 
 export { idParamsSchema } from "./shared.schema";
 
@@ -11,16 +11,20 @@ const dateRangeRefine = (data: { startDate?: Date; endDate?: Date }, ctx: z.Refi
   }
 };
 
+const workingDaysSchema = z.array(dayOfWeekSchema).min(1);
+
 export const createSemesterSchema = z.object({
   name: z.string().min(2).max(20).trim(),
   startDate: z.coerce.date(),
   endDate: z.coerce.date(),
+  workingDays: workingDaysSchema.optional(),
 }).superRefine(dateRangeRefine);
 
 export const updateSemesterSchema = z.object({
   name: z.string().min(2).max(20).trim().optional(),
   startDate: z.coerce.date().optional(),
   endDate: z.coerce.date().optional(),
+  workingDays: workingDaysSchema.optional(),
 }).superRefine(dateRangeRefine);
 
 export type ListSemestersQuery = z.infer<typeof listSemestersQuerySchema>;

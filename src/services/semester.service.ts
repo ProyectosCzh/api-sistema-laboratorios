@@ -22,17 +22,41 @@ export async function getSemester(id: string): Promise<Semester> {
   return toSemester(semester);
 }
 
-export async function createSemester(data: { name: string; startDate: Date; endDate: Date }): Promise<Semester> {
+const DEFAULT_WORKING_DAYS = [1, 2, 3, 4, 5, 6];
+
+function normalizeWorkingDays(days: number[]): number[] {
+  return [...new Set(days)].sort((a, b) => a - b);
+}
+
+export async function createSemester(data: {
+  name: string;
+  startDate: Date;
+  endDate: Date;
+  workingDays?: number[];
+}): Promise<Semester> {
   if (data.endDate <= data.startDate) throw ApiErrors.validation([{ field: "endDate", message: "endDate debe ser posterior a startDate" }]);
-  const semester = await prisma.semester.create({ data: { ...data, isActive: false } });
+  const semester = await prisma.semester.create({
+    data: {
+      name: data.name,
+      startDate: data.startDate,
+      endDate: data.endDate,
+      workingDays: normalizeWorkingDays(data.workingDays ?? DEFAULT_WORKING_DAYS),
+      isActive: false,
+    },
+  });
   return toSemester(semester);
 }
 
-export async function updateSemester(id: string, data: { name?: string; startDate?: Date; endDate?: Date }): Promise<Semester> {
+export async function updateSemester(
+  id: string,
+  data: { name?: string; startDate?: Date; endDate?: Date; workingDays?: number[] }
+): Promise<Semester> {
   if (data.startDate && data.endDate && data.endDate <= data.startDate) {
     throw ApiErrors.validation([{ field: "endDate", message: "endDate debe ser posterior a startDate" }]);
   }
-  const semester = await prisma.semester.update({ where: { id }, data });
+  const updateData = { ...data };
+  if (data.workingDays !== undefined) updateData.workingDays = normalizeWorkingDays(data.workingDays);
+  const semester = await prisma.semester.update({ where: { id }, data: updateData });
   return toSemester(semester);
 }
 
@@ -50,21 +74,29 @@ export async function deleteSemester(id: string): Promise<void> {
   if (!semester) throw ApiErrors.notFound("Semestre no encontrado");
   if (semester.isActive) throw ApiErrors.semesterActive();
 
-  const [offeringsCount, schedulesCount] = await Promise.all([
-    prisma.courseOffering.count({ where: { semesterId: id } }),
+  const [reservationsCount, schedulesCount] = await Promise.all([
+    prisma.reservation.count({ where: { semesterId: id } }),
     prisma.schedule.count({ where: { semesterId: id } }),
   ]);
-  if (offeringsCount > 0 || schedulesCount > 0) throw ApiErrors.semesterHasDependencies();
+  if (reservationsCount > 0 || schedulesCount > 0) throw ApiErrors.semesterHasDependencies();
 
   await prisma.semester.delete({ where: { id } });
 }
 
-function toSemester(s: { id: string; name: string; startDate: Date; endDate: Date; isActive: boolean }): Semester {
+function toSemester(s: {
+  id: string;
+  name: string;
+  startDate: Date;
+  endDate: Date;
+  workingDays: number[];
+  isActive: boolean;
+}): Semester {
   return {
     id: s.id,
     name: s.name,
     startDate: s.startDate.toISOString(),
     endDate: s.endDate.toISOString(),
+    workingDays: s.workingDays,
     isActive: s.isActive,
   };
 }

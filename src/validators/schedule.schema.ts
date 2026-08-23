@@ -1,4 +1,5 @@
 import { z } from "zod";
+import { dayOfWeekSchema } from "./shared.schema";
 
 export { idParamsSchema } from "./shared.schema";
 
@@ -10,8 +11,9 @@ export const listSchedulesQuerySchema = z.object({
 export const createScheduleSchema = z.object({
   classroomId: z.string().min(1),
   semesterId: z.string().min(1),
-  courseOfferingId: z.string().min(1),
-  dayOfWeek: z.coerce.number().int().min(1).max(6),
+  subjectId: z.string().min(1),
+  teacherId: z.string().min(1).nullish(),
+  dayOfWeek: dayOfWeekSchema,
   timeSlotId: z.string().min(1),
   note: z.string().max(500).trim().nullish(),
 });
@@ -19,8 +21,9 @@ export const createScheduleSchema = z.object({
 export const updateScheduleSchema = z.object({
   classroomId: z.string().min(1).optional(),
   semesterId: z.string().min(1).optional(),
-  courseOfferingId: z.string().min(1).optional(),
-  dayOfWeek: z.coerce.number().int().min(1).max(6).optional(),
+  subjectId: z.string().min(1).optional(),
+  teacherId: z.string().min(1).nullish().optional(),
+  dayOfWeek: dayOfWeekSchema.optional(),
   timeSlotId: z.string().min(1).optional(),
   note: z.string().max(500).trim().nullish().optional(),
 }).refine(obj => Object.keys(obj).length > 0, { message: "Al menos un campo requerido" });
