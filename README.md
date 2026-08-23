@@ -1,10 +1,10 @@
 # LABMANAGE API
 
-Backend REST de **LABMANAGE**, sistema de gestión de aulas/laboratorios: disponibilidad, uso y estados de las aulas de una institución.
+Backend REST de **LABMANAGE**, sistema de gestión de aulas/laboratorios: disponibilidad, reservas, uso y estados de las aulas de una institución.
 
 Este proyecto es la **API** que administra la base de datos. El frontend (`labmanage-web`, Astro + React) **solo** consume esta API a través de HTTP/JSON con autenticación JWT.
 
-> **Fuente de verdad**: el contrato original vive en [`PLAN.md`](../PLAN.md) (secciones 5–8); la migración al modelo normalizado en [`PLAN_MIGRACION_MODELO_DATOS.md`](../PLAN_MIGRACION_MODELO_DATOS.md) y [`NORMALIZACION_MODELO_DATOS.md`](../NORMALIZACION_MODELO_DATOS.md). Este README documenta el **comportamiento real** de la implementación actual y prevalece sobre esos documentos ante cualquier divergencia.
+> **Fuente de verdad**: el concepto funcional vive en [`PROYECTOMINIMO.md`](./PROYECTOMINIMO.md) (seis entidades, Tabla Semanal de Disponibilidad, flujos Encargado/Ayudante) y su realineamiento ejecutado en [`PLAN_REALINEACION_MODELO.md`](./PLAN_REALINEACION_MODELO.md). Este README documenta el **comportamiento real** de la implementación y prevalece ante cualquier divergencia.
 
 ---
 
@@ -18,8 +18,8 @@ Este proyecto es la **API** que administra la base de datos. El frontend (`labma
 | BD | PostgreSQL en **Neon** (serverless) |
 | Auth | JWT (`jsonwebtoken`, expiración 12h) + `bcryptjs` (salt 12) |
 | Validación | Zod 4 (en el límite de la API) |
-| Seguridad | Helmet · CORS · rate limiting en login (`express-rate-limit`) · body limit 1 MB |
-| Testing | Vitest + Supertest |
+| Seguridad | Helmet · CORS · rate limiting (`express-rate-limit`: global 300/15min + login 20/15min) · body limit 1 MB |
+| Logging | `morgan` (formato `dev` en desarrollo, `tiny` en producción; silencia `/health`) |
 
 ## Arquitectura
 
@@ -39,9 +39,9 @@ labmanage-web  ──(HTTP + JSON + JWT Bearer)──►  labmanage-api  ──(
 labmanage-api/
 ├── prisma/
 │   ├── schema.prisma        # Modelos, enums y relaciones (DDL)
+│   ├── migrations/          # Migración única: 20260823065113_init
 │   ├── seed.config.ts       # Datos maestros editables por la institución
-│   ├── seed.ts              # Seed idempotente (upsert)
-│   └── migrations/          # Migraciones versionadas
+│   └── seed.ts              # Seed idempotente (upsert + validación de conflictos)
 ├── src/
 │   ├── index.ts             # Arranque del servidor (app.listen)
 │   ├── app.ts               # Express: helmet, cors, json, router /api, errorHandler
@@ -50,36 +50,31 @@ labmanage-api/
 │   ├── middleware/
 │   │   ├── auth.ts          # requireAuth, requireRole (adjunta req.user)
 │   │   ├── validate.ts      # Validación Zod genérica (body | query | params)
-│   │   ├── rateLimit.ts     # Rate limiter de login (factory testeable)
+│   │   ├── rateLimit.ts     # Rate limiters: global (300/15min) y login (20/15min)
 │   │   └── errorHandler.ts  # Traduce Zod y errores Prisma al formato { error }
 │   ├── routes/              # Definen endpoints, middlewares y validación Zod
-│   ├── services/            # Lógica de negocio (permisos, conflictos, transacciones)
+│   ├── services/
+│   │   ├── slotAvailability.service.ts  # ★ Reglas transaccionales de ocupación compartidas
+│   │   ├── schedule.service.ts          # Planilla semanal (materia + docente)
+│   │   ├── reservation.service.ts       # Reservas con ciclo de vida
+│   │   ├── availability.service.ts      # Estado del aula + grilla semanal
+│   │   └── ...                           # auth, users, classrooms, semesters, etc.
 │   ├── types/index.ts       # Tipos de respuesta compartidos (fuente de verdad)
-│   └── utils/               # errors.ts (ApiErrors) · dbErrors.ts (parseo de P2002) · serializers.ts (toPublicUser)
-└── tests/                   # Suites de test por recurso
+│   ├── docs/openapi.ts      # Spec OpenAPI servida con Scalar (/api/docs)
+│   └── utils/               # errors.ts (ApiErrors) · dbErrors.ts (P2002) · serializers.ts
 ```
 
-### Flujo de una petición
+★ `slotAvailability.service.ts` es el núcleo del sistema: toda operación que ocupa una celda (crear/editar horario, crear reserva recurrente o puntual, confirmar reserva) ejecuta las mismas validaciones dentro de una transacción interactiva de Prisma.
 
-```
-Request ─► helmet/cors/express.json ─► /api ─► routes (validación Zod) ─► services (lógica) ─► Prisma ─► Neon
-                                                                                              │
-                                                     errorHandler ◄──── error (Zod / ApiError / Prisma)
-                                                                                              │
-                                                                                    { error: {...} } ◄──── 400/401/403/404/409/500
-```
+### Convenciones temporales (importantes)
 
-Reglas de capas (obligatorias):
-
-- **`routes/*.routes.ts`** — definen el endpoint, aplican `requireAuth`/`requireRole`, validan con Zod y delegan al service. **Nunca** contienen lógica de negocio.
-- **`services/*.service.ts`** — lógica de negocio (conflictos de celda, transacciones, permisos de autor, estados). Solo aquí se toca Prisma.
-- **`middleware/errorHandler.ts`** — traduce `ZodError` → 400 `VALIDATION_ERROR`, `ApiError` → su código, y errores Prisma `P2002` → 409, `P2025`/`P2003` → 404.
+- Toda fecha calendario se normaliza a **medianoche UTC** (`utcStartOfDay`). Enviar `YYYY-MM-DD` o ISO.
+- El día de la semana se deriva de la fecha UTC (`getUTCDay`). `dayOfWeek`: **1=Lunes … 6=Sábado** (domingo no laborable).
+- Los turnos son los 9 bloques horarios oficiales (07:15 a 21:45).
 
 ---
 
 ## Flujo típico de uso
-
-Secuencia común de llamadas para operar la grilla de horarios:
 
 ```mermaid
 sequenceDiagram
@@ -88,45 +83,39 @@ sequenceDiagram
 
     Note over F,A: 1. Autenticación
     F->>A: POST /api/auth/login {email, password}
-    A-->>F: 200 {token, user}
-    F->>F: Guarda token → Authorization: Bearer <token>
+    A-->>F: 200 {data: {token, user}}
 
-    Note over F,A: 2. Carga inicial (catálogos estáticos)
-    F->>A: GET /api/time-slots
-    F->>A: GET /api/classrooms
-    F->>A: GET /api/semesters
-    A-->>F: {timeSlots: [...]}, {classrooms: [...]}, {semesters: [...]}
+    Note over F,A: 2. Carga inicial
+    F->>A: GET /api/time-slots · /classrooms · /semesters · /subjects · /teachers
+    A-->>F: catálogos completos
 
     Note over F,A: 3. Configuración (solo ENCARGADO)
-    Encargado->>A: POST /api/subjects {code, name}
-    Encargado->>A: POST /api/teachers {code, name, email?}
-    Encargado->>A: POST /api/course-offerings {semesterId, subjectId, section, teacherId?, type?}
-    Encargado->>A: POST /api/semesters/:id/activate
+    Encargado->>A: POST /api/subjects · /teachers (catálogos)
+    Encargado->>A: POST /api/schedules {classroomId, semesterId, subjectId, teacherId?, dayOfWeek, timeSlotId}
+    A-->>Encargado: 201 planilla semanal (materia+docente por celda)
 
-    Note over F,A: 4. Operación diaria (AYUDANTE / ENCARGADO)
-    Ayudante->>A: GET /api/schedules?classroomId=X&semesterId=Y
-    A-->>Ayudante: 200 {schedules: [{courseOffering: {subject, teacher, section, type}, timeSlot, classroom, ...}]}
-
-    Ayudante->>A: POST /api/schedules {classroomId, semesterId, courseOfferingId, dayOfWeek, timeSlotId, note?}
-    alt Éxito
-        A-->>Ayudante: 201 {schedule}
+    Note over F,A: 4. Operación diaria — Reservas (AYUDANTE pide, ENCARGADO confirma)
+    Ayudante->>A: POST /api/reservations {classroomId, semesterId, type: RECURRENTE|PUNTUAL, dayOfWeek?|date?, timeSlotId}
+    alt Celda libre
+        A-->>Ayudante: 201 {reservation} status=PENDIENTE
     else Conflicto
-        A-->>Ayudante: 409 {error: {code: "RESERVATION_CONFLICT" | "TEACHER_CONFLICT" | "OFFERING_CONFLICT" | "CLASSROOM_UNAVAILABLE"}}
+        A-->>Ayudante: 409 RESERVATION_CONFLICT | CLASSROOM_UNAVAILABLE | NON_WORKING_DAY | DATE_OUTSIDE_SEMESTER
     end
+    Encargado->>A: PATCH /api/reservations/:id/status {status: "CONFIRMADA"}
+    A-->>Encargado: 200 revalida disponibilidad antes de confirmar
 
-    Note over F,A: 5. Mantenimiento
+    Note over F,A: 5. Consulta de disponibilidad (§5.4 y §7 del doc base)
+    F->>A: GET /api/classrooms/:id/state?date=&timeSlotId=
+    A-->>F: {state: LIBRE | OCUPADA | MANTENIMIENTO, occupiedBy?}
+    F->>A: GET /api/availability/grid?semesterId=X
+    A-->>F: matriz días × turnos por aula (Tabla Semanal)
+
+    Note over F,A: 6. Mantenimiento y bitácora
     Ayudante->>A: POST /api/maintenance {classroomId, date, reason}
-    A-->>Ayudante: 201 {maintenance}  (aula → EN_MANTENIMIENTO)
+    Note over A: aula → EN_MANTENIMIENTO; bloquea nuevas reservas (§8)
     Encargado->>A: PATCH /api/maintenance/:id {status: "COMPLETADO"}
-    A-->>Encargado: 200 {maintenance}  (aula → ACTIVA si no hay más abiertos)
-
-    Note over F,A: 6. Bitácora y stats
-    F->>A: POST /api/annotations {classroomId, content}
-    F->>A: GET /api/stats/overview
-    A-->>F: StatsOverview {occupancyByClassroom, pendingMaintenance, ...}
+    F->>A: GET /api/stats/overview (+ reservationsByStatus)
 ```
-
-> **Nota**: Los endpoints de escritura (`POST/PATCH/DELETE`) validan permisos según rol y autoría (ver [Matriz de acceso](#matriz-de-acceso-por-endpoint)). Todos los errores siguen el formato `{ "error": { "code", "message", "details?" } }`.
 
 ---
 
@@ -161,7 +150,7 @@ npx prisma migrate dev
 npm run prisma:seed
 ```
 
-> `npx prisma migrate deploy` se usa en producción.
+> El seed valida el dataset antes de escribir: referencias existentes, celdas únicas y sin conflicto de docente entre aulas. Falla con error explícito si hay datos inconsistentes en `seed.config.ts`.
 
 ---
 
@@ -172,30 +161,29 @@ npm run prisma:seed
 | `npm run dev` | Arranca con `tsx watch` (recarga en caliente) |
 | `npm run build` | Compila TypeScript a `dist/` (`tsc`) |
 | `npm start` | Ejecuta el build (`node dist/index.js`) |
+| `npm run typecheck` | Verificación de tipos (`tsc --noEmit`) |
 | `npm run prisma:seed` | Carga/actualiza los datos maestros desde `seed.config.ts` |
-| `npm test` | Ejecuta todos los tests con Vitest |
-| `npm run test:watch` | Ejecuta tests en modo watch |
 
 ---
 
 ## Modelo de datos
 
-Esquema completo en `prisma/schema.prisma`. Nueve modelos organizados en **catálogos**, **operación** y **bitácora**:
+Esquema completo en `prisma/schema.prisma`. Diez modelos organizados en **catálogos**, **planilla**, **operación** y **bitácora**:
 
-| Modelo | Descripción | Campos clave | Relaciones |
-|--------|-------------|--------------|------------|
-| `User` | Usuario del sistema (encargado/ayudante) | `email` (único), `passwordHash`, `role`, `active` | `schedules`, `annotations`, `maintenance` |
-| `Teacher` | Docente del catálogo académico | `code` (único), `name`, `email?` (único), `active` | `offerings` |
-| `Subject` | Materia del catálogo académico | `code` (único), `name`, `active` | `offerings` |
-| `CourseOffering` | Comisión: materia+docente+sección en un semestre | `section`, `type`, `active`, `note?` | `semester`, `subject`, `teacher?`, `schedules` |
-| `Classroom` | Aula/laboratorio con estado de ciclo de vida | `code` (único), `name`, `type`, `capacity?`, `location?`, `status` | `schedules`, `annotations`, `maintenance` |
-| `TimeSlot` | Turno horario fijo | `label`, `startTime`, `endTime`, `order` (único) | `schedules` |
-| `Semester` | Semestre académico | `name` (único), `startDate`, `endDate`, `isActive` | `schedules`, `offerings` |
-| `Schedule` | Bloque del grid (reserva) que referencia una comisión | `dayOfWeek`, `note?` | `classroom`, `semester`, `timeSlot`, `courseOffering`, `assignedBy` |
-| `Annotation` | Anotación/bitácora de un aula | `date`, `content` | `classroom`, `user` |
-| `MaintenanceLog` | Reporte de mantenimiento | `date`, `reason`, `status` | `classroom`, `createdBy` |
+| Modelo | Descripción | Campos clave |
+|--------|-------------|--------------|
+| `User` | Usuario del sistema | `email` (único), `passwordHash`, `role`, `active` |
+| `Teacher` | Docente del catálogo académico | `code` (único), `name`, `email?` (único), `active` |
+| `Subject` | Materia del catálogo académico | `code` (único), `name`, `active` |
+| `Classroom` | Aula/laboratorio con estado de ciclo de vida | `code` (único), `name`, `type`, `capacity?`, `status` |
+| `TimeSlot` | Turno horario fijo (9 oficiales) | `label`, `startTime`, `endTime`, `order` (único) |
+| `Semester` | Semestre académico | `name` (único), fechas, `workingDays Int[]`, `isActive` único |
+| `Schedule` | Bloque de la planilla semanal: materia (+docente?) en una celda | `subjectId`, `teacherId?`, `dayOfWeek`, `note?`, `assignedBy` |
+| `Reservation` | Reserva operativa con ciclo de vida | `type`, `dayOfWeek?`/`date?`, `timeSlotId`, `status`, `requestedBy`, `resolvedBy?` |
+| `Annotation` | Anotación/bitácora de uso de un aula | `date`, `content` |
+| `MaintenanceLog` | Reporte de mantenimiento | `date`, `reason`, `status`; abierto = bloquea aula |
 
-> **Cambio de modelo (migración normalizada)**: `Schedule` ya **no** tiene `type`, `title` ni `teacher` como texto libre. Todo bloque apunta a una `CourseOffering` que aporta materia, docente, sección y tipo. `Classroom.active` fue reemplazado por `status`.
+Diseño según `PROYECTOMINIMO.md`: las comisiones (`CourseOffering`) fueron **eliminadas**; cada bloque de la planilla referencia directamente materia y docente. Las reservas son independientes de la planilla (uso operativo del espacio) y conviven con ella en la Tabla Semanal.
 
 ### Enums
 
@@ -204,70 +192,84 @@ Esquema completo en `prisma/schema.prisma`. Nueve modelos organizados en **catá
 | `UserRole` | `ENCARGADO` · `AYUDANTE` |
 | `ClassroomType` | `LAB_COMPUTACION` · `LAB_GENERAL` · `AULA` |
 | `ClassroomStatus` | `ACTIVA` · `INACTIVA` · `EN_MANTENIMIENTO` · `FUERA_SERVICIO` |
-| `CourseOfferingType` | `CLASE` · `EXTRACURRICULAR` · `ACTIVIDAD` |
+| `ReservationType` | `RECURRENTE` · `PUNTUAL` |
+| `ReservationStatus` | `PENDIENTE` · `CONFIRMADA` · `CANCELADA` |
 | `MaintenanceStatus` | `REPORTADO` · `EN_PROGRESO` · `COMPLETADO` |
 
 ### Restricciones de unicidad e integridad (a nivel BD)
 
 | Constraint | Garantía | Violación → error API |
 |-----------|----------|----------------------|
-| `@@unique([classroomId, semesterId, dayOfWeek, timeSlotId])` en `Schedule` | **Una celda = un bloque**: no hay dos reservas en el mismo hueco del grid | `409 RESERVATION_CONFLICT` |
-| `@@unique([courseOfferingId, dayOfWeek, timeSlotId])` en `Schedule` | **Una comisión no está en dos aulas simultáneas** | `409 OFFERING_CONFLICT` |
-| `@@unique([semesterId, subjectId, section, teacherId])` en `CourseOffering` | No existen comisiones duplicadas; permite comisiones paralelas con distinto docente | `409 OFFERING_ALREADY_EXISTS` |
-| Índice parcial único sobre `Semester(isActive) WHERE isActive` | **Un solo semestre activo**, garantizado por la BD misma | `409 CONFLICT` |
-| `code` únicos en `Teacher`, `Subject`, `Classroom`; `email` únicos en `User`, `Teacher` | Identidades de catálogo sin duplicados | Códigos específicos (`*_IN_USE`) |
+| `@@unique([classroomId, semesterId, dayOfWeek, timeSlotId])` en `Schedule` | **Una celda de la planilla = un bloque** | `409 RESERVATION_CONFLICT` |
+| Índice parcial único sobre `Semester(isActive) WHERE isActive` | **Un solo semestre activo**, garantizado por BD | `409 CONFLICT` |
+| `code` únicos en `Teacher`, `Subject`, `Classroom`; emails únicos en `User`, `Teacher` | Catálogos sin duplicados | Códigos específicos (`*_IN_USE`) |
 
-### Regla de disponibilidad de aula
-
-Un bloque solo puede crearse/editarse hacia un aula cuyo `status = "ACTIVA"` **y** que no tenga mantenimientos abiertos (`status != COMPLETADO`). Caso contrario → `409 CLASSROOM_UNAVAILABLE`. El mantenimiento ya no es un tipo de schedule: es un proceso aparte que sincroniza automáticamente el estado del aula (ver [Reglas de negocio](#reglas-de-negocio)).
+Las reservas **no** tienen constraint de unicidad: la ocupación se resuelve en servicio contra schedules + reservas activas dentro de transacciones.
 
 ---
 
-## Reglas de negocio
+## Reglas de negocio (ocupación)
 
-1. **Una celda = un bloque** — constraint sobre `(classroomId, semesterId, dayOfWeek, timeSlotId)` → `409 RESERVATION_CONFLICT`.
-2. **Una comisión = un lugar a la vez** — `(courseOfferingId, dayOfWeek, timeSlotId)` → `409 OFFERING_CONFLICT`. El docente de la comisión tampoco puede estar en dos aulas simultáneas → `409 TEACHER_CONFLICT` (validado en servicio dentro de la misma transacción).
-3. **Coincidencia semestre ↔ comisión** — un schedule solo puede crearse en el semestre de su comisión → `400 SEMESTER_MISMATCH`.
-4. **Aula disponible** — `status = ACTIVA` y sin mantenimiento abierto; si no, `409 CLASSROOM_UNAVAILABLE`. Las aulas `INACTIVA`, `EN_MANTENIMIENTO` o `FUERA_SERVICIO` no aceptan reservas nuevas.
-5. **Catálogos inactivos no asignables** — materias, docentes o comisiones con `active=false` no pueden usarse en horarios ni comisiones nuevos → `400 INACTIVE_CATALOG_ITEM` (los bloques existentes se preservan).
-6. **Sincronización automática aula ↔ mantenimiento** (transaccional):
-   - Crear reporte (`REPORTADO`) → aula pasa a `EN_MANTENIMIENTO` (si estaba `ACTIVA`).
-   - Completar o eliminar el último mantenimiento abierto → aula vuelve a `ACTIVA`.
-   - El estado también puede fijarse manualmente (`PATCH /classrooms/:id` con `status`); la sincronización nunca sobrescribe `INACTIVA`/`FUERA_SERVICIO`.
-7. **Un solo semestre activo** a la vez — garantizado por índice parcial único en BD; `activateSemester` desactiva todos y activa el elegido en una transacción.
-8. **Permisos**:
-   - `ENCARGADO`: todo — gestión de usuarios, catálogos académicos (materias/docentes/comisiones), aulas, semestres, estados de mantenimiento.
-   - `AYUDANTE`: ver todo; crear/editar/eliminar **sus propios** schedules; crear sus anotaciones; crear reportes de mantenimiento (no cambia su estado). No gestiona catálogos.
-9. **Contraseñas**: `bcryptjs` salt 12; `passwordHash` nunca se expone.
-10. **JWT**: expiración 12h; el rol siempre se lee de BD (tokens viejos no conservan privilegios).
-11. **Borrado lógico** de aulas (`status=INACTIVA`), usuarios, docentes, materias y comisiones (`active=false`); físico para schedules y anotaciones.
-12. **Validación Zod** en todos los `body`/`query`/`params` → `400 VALIDATION_ERROR` con `details` estructurados.
-13. **Errores**: formato uniforme `{ "error": { "code", "message", "details?" } }` (catálogo completo más abajo).
-14. **Fecha de mantenimiento**: `date` es día calendario, normalizado a UTC medianoche (`YYYY-MM-DD` o ISO).
-15. **Transacciones con timeout ampliado** (`30s`): las validaciones anti-conflicto corren dentro de transacciones interactivas de Prisma; contra Neon la latencia puede superar el default de 5s.
+Implementadas transaccionalmente en `slotAvailability.service.ts`:
+
+1. **Aula disponible** — `status = "ACTIVA"` **y** sin mantenimientos abiertos; caso contrario → `409 CLASSROOM_UNAVAILABLE`.
+2. **Una celda = un ocupante** — al crear/editar un horario o crear una reserva se verifica contra:
+   - `Schedule` en esa celda → `409 RESERVATION_CONFLICT`
+   - Reserva RECURRENTE activa (`PENDIENTE`/`CONFIRMADA`) en ese día+turno → idem
+   - Reserva PUNTUAL activa cuya fecha cae en ese día del semestre (choque inverso: la fecha puntual también bloquea su celda semanal) → idem
+3. **Docente libre** — un docente no puede estar en dos aulas el mismo día+turno (solo aplica a bloques de la planilla) → `409 TEACHER_CONFLICT`.
+4. **Días hábiles** — `dayOfWeek` debe estar en `semester.workingDays` (y nunca domingo) → `400 NON_WORKING_DAY`.
+5. **Rango semestral** — toda reserva PUNTUAL debe caer dentro de `[startDate, endDate]` del semestre → `400 DATE_OUTSIDE_SEMESTER`.
+6. **Catálogos inactivos no asignables** — materias/docentes con `active=false` no entran en horarios nuevos → `400 INACTIVE_CATALOG_ITEM`.
+
+### Ciclo de vida de una reserva
+
+```
+                    ┌────────────────────────────────────────────┐
+POST /reservations  │  PENDIENTE ──(confirmar ENCARGADO*)──► CONFIRMADA
+crea en PENDIENTE   │      │  │                                     │
+                    │      │  └──(cancela dueño†)──┐                │
+                    │      └─────(cancela ENCARGADO)├──► CANCELADA ◄─┘ (cancelar)
+                    └────────────────────────────────────────────┘
+* confirma solo si la celda sigue libre (revalidación).
+† un Ayudante cancela la propia solo mientras está PENDIENTE.
+CANCELADA es terminal. Edición (PATCH): dueño mientras PENDIENTE;
+ENCARGADO salvo CANCELADA. El tipo (RECURRENTE/PUNTUAL) es inmutable.
+```
+
+7. **Sincronización automática aula ↔ mantenimiento** — crear reporte → aula `EN_MANTENIMIENTO` (si estaba `ACTIVA`); completar/eliminar el último abierto → vuelve a `ACTIVA`. Nunca toca `INACTIVA`/`FUERA_SERVICIO`.
+8. **Un solo semestre activo** — garantizado por índice parcial único; `activateSemester` desactiva todos y activa uno en transacción.
+9. **Borrado lógico** para catálogos (`active=false`, aulas `INACTIVA`); físico para schedules, anotaciones y reservas ya `CANCELADA` (limpieza ENCARGADO).
+10. **Contraseñas**: bcrypt salt 12, `passwordHash` jamás se expone. **JWT**: expira en 12h; el rol siempre se lee de BD.
+11. **Transacciones con timeout ampliado** (`30s`/`maxWait 10s`): contra Neon las validaciones anti-conflicto superan el default de 5s.
 
 ---
 
 ## Autenticación y permisos
 
-- **Login**: `POST /api/auth/login` con `{ email, password }` → devuelve `{ token, user }`.
-- **Sesión**: enviar `Authorization: Bearer <token>` en todas las rutas autenticadas. Sin token (o token inválido) → `401`.
-- `requireAuth` valida el token, carga el usuario desde BD y **rechaza si el usuario fue desactivado** (`active=false`).
-- `requireRole('ENCARGADO')` → `403 FORBIDDEN` si el rol no está permitido.
+- **Login**: `POST /api/auth/login` con `{ email, password }` → `{ data: { token, user } }`.
+- **Sesión**: `Authorization: Bearer <token>` en toda ruta autenticada. Sin/inválido → `401`.
+- `requireAuth` carga el usuario desde BD y rechaza desactivados. `requireRole("ENCARGADO")` → `403 FORBIDDEN`.
 
 ### Matriz de acceso por endpoint
 
 | Acceso | Endpoints |
 |--------|-----------|
 | **PÚBLICO** | `GET /api/health` · `POST /api/auth/login` |
-| **AUTENTICADO** (encargado o ayudante) | `GET /api/auth/me` · `GET /api/classrooms` · `GET /api/time-slots` · `GET /api/semesters` · `GET /api/subjects` · `GET /api/teachers` · `GET /api/course-offerings` · `GET /api/schedules` · `GET /api/annotations` · `GET /api/maintenance` · `GET /api/stats/overview` · `POST /api/schedules`* · `PATCH/DELETE /api/schedules/:id`* · `POST /api/annotations` · `DELETE /api/annotations/:id`** · `POST /api/maintenance` |
-| **ENCARGADO** (solo) | CRUD `/api/users` · CRUD `/api/subjects` · CRUD `/api/teachers` · CRUD `/api/course-offerings` · `POST/PATCH/DELETE /api/classrooms` (incl. cambio de `status`) · `POST/PATCH /api/semesters` · `POST /api/semesters/:id/activate` · `PATCH/DELETE /api/maintenance/:id` |
-| **AUTOR del recurso o ENCARGADO** | `PATCH/DELETE /api/schedules/:id` · `DELETE /api/annotations/:id` |
+| **AUTENTICADO** | Lecturas de catálogos y recursos · `GET /api/schedules` · `GET /api/reservations`¹ · `POST /api/reservations` · `PATCH /api/reservations/:id`² · `PATCH /api/reservations/:id/status`³ · `GET /api/classrooms/:id/state` · `GET /api/availability/grid` · `POST /api/schedules`⁴ · `PATCH/DELETE /api/schedules/:id`⁴ · `POST /api/annotations` · `DELETE /api/annotations/:id`⁵ · `POST /api/maintenance` |
+| **ENCARGADO** (solo) | CRUD `/users`, `/subjects`, `/teachers`, `/time-slots` · `POST/PATCH/DELETE /classrooms` · `POST/PATCH /semesters` · `POST /semesters/:id/activate` · `PATCH/DELETE /maintenance/:id` · `DELETE /reservations/:id`⁶ |
 
-\* Un ayudante puede crear schedules y editar/eliminar **solo los propios**. Ya no existe la restricción por tipo (`MANTENIMIENTO` desapareció como tipo de schedule).
-\*\* Un ayudante solo elimina sus propias anotaciones.
+1. El Ayudante solo ve **sus propias** reservas; el Encargado ve todas (filtros por `status/classroomId/semesterId/type`).
+2. Edición: dueño mientras `PENDIENTE`; Encargado salvo `CANCELADA`.
+3. Confirmar/cancelar: Encargado cualquier transición válida; Ayudante dueño solo cancelar mientras `PENDIENTE`.
+4. En schedules, un Ayudante edita/elimina solo los que él creó.
+5. Anotaciones: autor o Encargado.
+6. Borrado físico de reservas ya `CANCELADA`.
 
-> **Rate limiting**: `POST /api/auth/login` está limitado a **20 intentos por IP cada 15 minutos**. Al superarse responde `429 RATE_LIMIT_EXCEEDED`. Durante los tests (`NODE_ENV=test`) el límite se eleva para no interferir con la suite.
+> **Rate limiting** (`express-rate-limit`):
+> - Global sobre todo `/api`: **300 requests por IP cada 15 min** (exceptúa `/health` y `/openapi.json`).
+> - Login: **20 intentos por IP cada 15 min**.
+> - Al superar cualquiera → `429 RATE_LIMIT_EXCEEDED`.
 
 ---
 
@@ -275,432 +277,281 @@ Un bloque solo puede crearse/editarse hacia un aula cuyo `status = "ACTIVA"` **y
 
 ### Convenciones generales
 
-- **Base URL**: `http://localhost:3001/api` (en producción, la URL desplegada).
-- **Auth**: `Authorization: Bearer <token>`.
-- **Respuestas de listas**: siempre en un objeto contenedor (`{ users: [...] }`, `{ classrooms: [...] }`, `{ timeSlots: [...] }`, `{ semesters: [...] }`, `{ schedules: [...] }`, `{ annotations: [...] }`, `{ maintenance: [...] }`). Nunca arrays desnudos.
-- **Respuestas individuales**: `{ user }`, `{ classroom }`, `{ semester }`, `{ schedule }`, `{ annotation }`, `{ maintenance }`.
-- **Eliminaciones (DELETE)**: siempre `{ ok: true }` en 200, para todos los recursos.
-- **Búsquedas GET**: filtros opcionales por query string. `?includeInactive=true` solo tiene efecto para rol `ENCARGADO` (el ayudante siempre ve solo activos).
-- **Fechas**: serializadas en **ISO 8601** (UTC). `dayOfWeek`: 1=Lunes … 6=Sábado. Horas: `HH:mm`.
-- **IDs**: strings opacas (cuid o ids legibles del seed). Los clientes nunca deben parsear su formato.
-- **Enums** viajan como strings exactas: `"ENCARGADO"`, `"AYUDANTE"`, `"LAB_COMPUTACION"`, `"LAB_GENERAL"`, `"AULA"`, `"ACTIVA"`, `"INACTIVA"`, `"EN_MANTENIMIENTO"`, `"FUERA_SERVICIO"`, `"CLASE"`, `"EXTRACURRICULAR"`, `"ACTIVIDAD"`, `"REPORTADO"`, `"EN_PROGRESO"`, `"COMPLETADO"`.
+- **Base URL**: `http://localhost:3001/api`.
+- **Éxito**: `{ "data": ... }`. Listas paginadas: `{ data: [...], meta: { page, pageSize, total, totalPages } }` (users, classrooms, subjects, teachers, semesters, reservations, annotations, maintenance). Excepciones sin paginar: `{ data: TimeSlot[] }` (turnos), `{ data: Schedule[] }` (schedules), grilla y stats con objetos propios.
+- **Eliminaciones**: `204 No Content` (sin body).
+- **Errores**: `{ "error": { "code", "message", "details?" } }`.
+- **Fechas**: ISO 8601 UTC; entrada acepta `YYYY-MM-DD`. `dayOfWeek`: 1=Lunes … 6=Sábado.
+- Enums viajan como strings exactas (`"PENDIENTE"`, `"RECURRENTE"`, `"OCUPADA"`, …).
+- **Documentación interactiva**: UI Scalar en `/api/docs` y spec cruda en `/api/openapi.json`, ambas servidas por la app.
 
 ### Catálogo de códigos de error
 
 | Código | HTTP | Cuándo |
 |--------|------|--------|
-| `VALIDATION_ERROR` | 400 | Body/query/params no cumplen Zod; `details` con issues por campo |
+| `VALIDATION_ERROR` | 400 | Body/query/params no cumplen Zod (`details` por campo) |
 | `CANNOT_DELETE_SELF` | 400 | Encargado intenta eliminarse a sí mismo |
-| `INACTIVE_CATALOG_ITEM` | 400 | Materia/docente/comisión inactiva usada en horario o comisión nueva |
-| `SEMESTER_MISMATCH` | 400 | El semestre del schedule no coincide con el de la comisión |
-| `AUTH_INVALID_CREDENTIALS` | 401 | Login con email o contraseña incorrecta |
-| `TOKEN_INVALID` | 401 | Token ausente, malformado, de firma inválida, o usuario no encontrado/desactivado |
-| `TOKEN_EXPIRED` | 401 | Token vencido (>12h) |
-| `USER_INACTIVE` | 401 | Usuario desactivado (`active=false`) intenta autenticarse |
-| `FORBIDDEN` | 403 | Rol no permitido o no es el autor del recurso |
-| `NOT_FOUND` | 404 | Recurso inexistente, ruta inexistente o referencia inexistente (P2003) |
-| `RESERVATION_CONFLICT` | 409 | Celda ya ocupada (aula+semestre+día+turno) |
-| `OFFERING_CONFLICT` | 409 | La comisión ya tiene un bloque en ese día/turno (otra aula) |
-| `TEACHER_CONFLICT` | 409 | El docente ya dicta en otra aula en ese día/turno |
-| `CLASSROOM_UNAVAILABLE` | 409 | El aula no está `ACTIVA` o tiene un mantenimiento abierto |
-| `NO_ACTIVE_SEMESTER` | 409 | No existe ningún semestre activo para operar horarios |
-| `EMAIL_IN_USE` | 409 | Email duplicado en usuarios |
-| `CLASSROOM_CODE_IN_USE` | 409 | Código de aula duplicado |
-| `SUBJECT_CODE_IN_USE` | 409 | Código de materia duplicado (también al reusar el de una baja) |
-| `TEACHER_CODE_IN_USE` | 409 | Código de docente duplicado |
-| `TEACHER_EMAIL_IN_USE` | 409 | Email de docente duplicado |
-| `OFFERING_ALREADY_EXISTS` | 409 | Comisión duplicada (semestre+materia+sección+docente) |
-| `CONFLICT` | 409 | Otra violación de unicidad `P2002` no clasificada (incluye segundo semestre activo) |
-| `RATE_LIMIT_EXCEEDED` | 429 | Supera el límite de intentos de `POST /auth/login` |
-| `INTERNAL_ERROR` | 500 | Error no controlado (mensaje genérico, sin stack) |
+| `CURRENT_PASSWORD_INVALID` | 400 | Cambio de contraseña con actual incorrecta |
+| `INACTIVE_CATALOG_ITEM` | 400 | Materia/docente inactivo usado en horario nuevo |
+| `NON_WORKING_DAY` | 400 | Día fuera de `workingDays` del semestre o domingo |
+| `DATE_OUTSIDE_SEMESTER` | 400 | Fecha puntual fuera de `[startDate, endDate]` |
+| `AUTH_INVALID_CREDENTIALS` | 401 | Login incorrecto |
+| `TOKEN_INVALID` / `TOKEN_EXPIRED` | 401 | Token ausente/malformado/vencido |
+| `USER_INACTIVE` | 401 | Usuario desactivado |
+| `FORBIDDEN` | 403 | Rol insuficiente o no es autor/dueño del recurso |
+| `NOT_FOUND` | 404 | Recurso o ruta inexistente (incluye P2025) |
+| `RESERVATION_CONFLICT` | 409 | Celda ocupada por schedule u otra reserva activa |
+| `TEACHER_CONFLICT` | 409 | Docente ya asignado ese día+turno en otra aula |
+| `CLASSROOM_UNAVAILABLE` | 409 | Aula no `ACTIVA` o con mantenimiento abierto |
+| `INVALID_RESERVATION_TRANSITION` | 409 | Transición de estado inválida (p.ej. confirmar una CANCELADA) |
+| `RESERVATION_NOT_EDITABLE` | 409 | La reserva ya no está PENDIENTE para su editor |
+| `EMAIL_IN_USE` · `CLASSROOM_CODE_IN_USE` · `SUBJECT_CODE_IN_USE` · `TEACHER_CODE_IN_USE` · `TEACHER_EMAIL_IN_USE` · `TIME_SLOT_ORDER_IN_USE` | 409 | Unicidad de catálogos |
+| `SEMESTER_HAS_DEPENDENCIES` | 409 | Semestre con horarios o reservas no se elimina |
+| `SEMESTER_ACTIVE` | 409 | No se elimina el semestre activo |
+| `TIME_SLOT_IN_USE` | 409 | Turno con horarios asociados |
+| `USER_HAS_DEPENDENCIES` | 409 | Usuario con registros asociados |
+| `CONFLICT` | 409 | Unicidad P2002 no clasificada o referencia inexistente (P2003) |
+| `RATE_LIMIT_EXCEEDED` | 429 | Límite global o de login superado |
+| `SERVICE_UNAVAILABLE` | 503 | BD caída en health check |
+| `INTERNAL_ERROR` | 500 | Error no controlado |
 
-Formato de respuesta de error (uniforme):
-
-```json
-{
-  "error": {
-    "code": "VALIDATION_ERROR",
-    "message": "Revisá los datos ingresados",
-    "details": [{ "field": "email", "message": "Invalid email address" }]
-  }
-}
-```
-
-### Tipos de respuesta
-
-Los tipos de `src/types/index.ts` son la **fuente de verdad** y se reflejan 1:1 en el frontend (`web/src/lib/types.ts`).
+### Tipos de respuesta (fuente de verdad: `src/types/index.ts`)
 
 ```ts
 type UserRole = "ENCARGADO" | "AYUDANTE";
 type ClassroomType = "LAB_COMPUTACION" | "LAB_GENERAL" | "AULA";
 type ClassroomStatus = "ACTIVA" | "INACTIVA" | "EN_MANTENIMIENTO" | "FUERA_SERVICIO";
-type CourseOfferingType = "CLASE" | "EXTRACURRICULAR" | "ACTIVIDAD";
+type ReservationType = "RECURRENTE" | "PUNTUAL";
+type ReservationStatus = "PENDIENTE" | "CONFIRMADA" | "CANCELADA";
 type MaintenanceStatus = "REPORTADO" | "EN_PROGRESO" | "COMPLETADO";
+type ClassroomAvailabilityState = "LIBRE" | "OCUPADA" | "MANTENIMIENTO";
 
-interface User { id: string; name: string; email: string; role: UserRole; active: boolean; createdAt: string; updatedAt: string; }        // NUNCA incluye passwordHash
-interface Teacher { id: string; code: string; name: string; email: string | null; active: boolean; createdAt: string; updatedAt: string; }
-interface Subject { id: string; code: string; name: string; active: boolean; createdAt: string; updatedAt: string; }
-interface CourseOfferingSummary {
-  id: string; semesterId: string; section: string; type: CourseOfferingType;
-  subject: { id: string; code: string; name: string };
-  teacher: { id: string; code: string; name: string } | null;
-}
-interface CourseOffering extends CourseOfferingSummary { note: string | null; active: boolean; createdAt: string; updatedAt: string; }
-interface Classroom { id: string; code: string; name: string; type: ClassroomType; capacity: number | null; location: string | null; status: ClassroomStatus; createdAt: string; updatedAt: string; }
-interface TimeSlot { id: string; label: string; startTime: string; endTime: string; order: number; }
-interface Semester { id: string; name: string; startDate: string; endDate: string; isActive: boolean; }
 interface Schedule {
-  id: string; classroomId: string; classroom: { id: string; code: string; name: string };
-  semesterId: string; dayOfWeek: number; timeSlotId: string;
-  timeSlot: TimeSlot; courseOfferingId: string; courseOffering: CourseOfferingSummary;
-  note: string | null; assignedById: string; assignedBy: { id: string; name: string }; updatedAt: string;
+  id: string; classroomId: string; classroom: { id; code; name };
+  semesterId: string;
+  subjectId: string; subject: { id; code; name };
+  teacherId: string | null; teacher: { id; code; name } | null;
+  dayOfWeek: number; timeSlotId: string; timeSlot: TimeSlot;
+  note: string | null; assignedById: string; assignedBy: { id; name };
+  updatedAt: string;
 }
-interface Annotation { id: string; classroomId: string; userId: string; user: { id: string; name: string }; date: string; content: string; }
-interface MaintenanceLog { id: string; classroomId: string; classroom: { id: string; code: string; name: string }; date: string; reason: string; status: MaintenanceStatus; createdById: string; createdAt: string; }
+
+interface Reservation {
+  id: string; classroomId: string; classroom: { id; code; name };
+  semesterId: string; type: ReservationType;
+  dayOfWeek: number | null;          // RECURRENTE
+  date: string | null;               // PUNTUAL (medianoche UTC)
+  timeSlotId: string; timeSlot: TimeSlot;
+  status: ReservationStatus; note: string | null;
+  requestedById: string; requestedBy: { id; name };
+  resolvedById: string | null; resolvedBy: { id; name } | null;
+  createdAt: string; updatedAt: string;
+}
+
+interface ClassroomStateResult {
+  classroomId: string; classroom: { id; code; name };
+  date: string; dayOfWeek: number; timeSlotId: string;
+  state: ClassroomAvailabilityState;
+  reason?: string;
+  occupiedBy?: { kind: "SCHEDULE"; schedule: Schedule }
+             | { kind: "RESERVATION"; reservation: Reservation };
+}
+
+// Grilla semanal: matriz workingDays × timeSlots por aula
+interface AvailabilityGridCell {
+  dayOfWeek: number; timeSlotId: string;
+  entry: null
+    | { kind: "SCHEDULE"; scheduleId: string; subject: {id;code;name}; teacher: {id;code;name} | null }
+    | { kind: "RESERVATION"; reservationId: string; type: ReservationType; status: ReservationStatus; date: string | null };
+}
+interface AvailabilityGridClassroom {
+  classroom: { id; code; name };
+  maintenance: Array<{ id; date; reason; status: MaintenanceStatus }>;
+  cells: AvailabilityGridCell[];
+}
+
 interface StatsOverview {
-  totalClassrooms: number;   // excluye INACTIVA
+  totalClassrooms: number;
   classroomsByType: { type: ClassroomType; count: number }[];
   activeSemester: { id: string; name: string } | null;
-  occupancyByClassroom: { classroom: { id: string; code: string; name: string }; occupiedSlots: number; totalSlots: number; percentage: number }[];
-  pendingMaintenance: number;   // REPORTADO + EN_PROGRESO
+  occupancyByClassroom: { classroom: {id;code;name}; occupiedSlots: number; totalSlots: number; percentage: number }[];
+  pendingMaintenance: number;
+  reservationsByStatus: { status: ReservationStatus; count: number }[];
 }
-interface AuthResponse { token: string; user: User; }
 ```
-
-> **Cambios de contrato para el frontend**: `Classroom.active` → `Classroom.status`; `Schedule.type/title/teacher` → `Schedule.courseOffering { subject, teacher, section, type }`; nuevo campo `Schedule.classroom`.
-
-### Endpoints — detalle
-
-> Ejemplos JSON request/response exactos: ver `PLAN.md` sección 8.4. Los tipos Zod de cada campo se listan aquí; el detalle de cada respuesta sigue los tipos de la sección anterior.
-
-#### Autenticación
-
-**`POST /api/auth/login`** — Público (rate limited)
-- Body: `{ email: email().max(254) → lowercased, password: string().min(1).max(100) }`
-- **200** `{ token, user }` · **400** `VALIDATION_ERROR` · **401** `AUTH_INVALID_CREDENTIALS` | `USER_INACTIVE` · **429** `RATE_LIMIT_EXCEEDED` (20 intentos/15 min por IP)
-
-**`GET /api/auth/me`** — Autenticado
-- **200** `{ user }` · **401** `TOKEN_INVALID` | `TOKEN_EXPIRED`
-
-#### Usuarios (solo ENCARGADO)
-
-**`GET /api/users`** — orden `createdAt` desc, incluye inactivos.
-- **200** `{ users: User[] }` · **403** `FORBIDDEN`
-
-**`POST /api/users`**
-- Body: `{ name: string().min(2).max(100), email: email().max(254), password: string().min(8).max(100), role: enum("ENCARGADO","AYUDANTE") }`
-- **201** `{ user }` · **400** `VALIDATION_ERROR` · **409** `EMAIL_IN_USE`
-
-**`PATCH /api/users/:id`** — body parcial (al menos un campo)
-- Body: `{ name?, email?, password?, role?, active? }`
-- **200** `{ user }` · **400** `VALIDATION_ERROR` · **404** `NOT_FOUND` · **409** `EMAIL_IN_USE`
-
-**`DELETE /api/users/:id`** — soft delete (`active=false`)
-- No puede eliminar el usuario autenticado → **400** `CANNOT_DELETE_SELF`.
-- **200** `{ ok: true }` · **400** `CANNOT_DELETE_SELF` · **404** `NOT_FOUND`
-
-#### Aulas
-
-**`GET /api/classrooms`** — Autenticado
-- Query opcional: `?includeInactive=true` (solo ENCARGADO ve inactivas) · `?status=ACTIVA|INACTIVA|EN_MANTENIMIENTO|FUERA_SERVICIO` (filtra por estado; `INACTIVA` requiere además `includeInactive=true`).
-- **200** `{ classrooms: Classroom[] }` (orden `code` asc) · **401**
-
-**`POST /api/classrooms`** — ENCARGADO
-- Body: `{ code: string().min(2).max(20) → uppercase+trim, name: string().min(2).max(100), type: enum(...), capacity?: int().min(1).max(500), location?: string().max(200).nullish() }`
-- Se crea con `status: "ACTIVA"`.
-- **201** `{ classroom }` · **400** `VALIDATION_ERROR` · **409** `CLASSROOM_CODE_IN_USE`
-
-**`PATCH /api/classrooms/:id`** — ENCARGADO (parcial)
-- Body: `{ code?, name?, type?, capacity?, location?, status?: enum("ACTIVA","INACTIVA","EN_MANTENIMIENTO","FUERA_SERVICIO") }`
-- El cambio manual de `status` convive con la sincronización automática de mantenimiento: si hay un mantenimiento abierto, completarlo devolverá el aula a `ACTIVA`.
-- **200** `{ classroom }` · **400** `VALIDATION_ERROR` · **404** `NOT_FOUND` · **409** `CLASSROOM_CODE_IN_USE`
-
-**`DELETE /api/classrooms/:id`** — ENCARGADO, soft delete (`status → "INACTIVA"`)
-- **200** `{ ok: true }` · **404** `NOT_FOUND`
-
-#### Materias (catálogo académico)
-
-**`GET /api/subjects`** — Autenticado
-- Query opcional: `?includeInactive=true` (solo ENCARGADO).
-- **200** `{ subjects: Subject[] }` (orden `code` asc)
-
-**`GET /api/subjects/:id`** — Autenticado · **200** `{ subject }` · **404** `NOT_FOUND`
-
-**`POST /api/subjects`** — ENCARGADO
-- Body: `{ code: string().min(2).max(20) → uppercase+trim, name: string().min(2).max(120) }`
-- **201** `{ subject }` · **409** `SUBJECT_CODE_IN_USE`
-
-**`PATCH /api/subjects/:id`** — ENCARGADO (parcial)
-- Body: `{ name?, active? }`
-- Bajar a `active=false` no afecta bloques existentes, pero impide crear comisiones u horarios nuevos con ella (`400 INACTIVE_CATALOG_ITEM`).
-- **200** `{ subject }` · **404** `NOT_FOUND` · **409** `SUBJECT_CODE_IN_USE`
-
-**`DELETE /api/subjects/:id`** — ENCARGADO, baja lógica (`active=false`)
-- **200** `{ ok: true }` · **404** `NOT_FOUND`
-
-#### Docentes (catálogo académico)
-
-**`GET /api/teachers`** — Autenticado
-- Query opcional: `?includeInactive=true` (solo ENCARGADO). Orden `name` asc.
-- **200** `{ teachers: Teacher[] }`
-
-**`GET /api/teachers/:id`** — Autenticado · **200** `{ teacher }` · **404** `NOT_FOUND`
-
-**`POST /api/teachers`** — ENCARGADO
-- Body: `{ code: string().min(2).max(30) → uppercase+trim, name: string().min(2).max(120), email?: email().nullish() → lowercased }`
-- **201** `{ teacher }` · **409** `TEACHER_CODE_IN_USE` | `TEACHER_EMAIL_IN_USE`
-
-**`PATCH /api/teachers/:id`** — ENCARGADO (parcial)
-- Body: `{ name?, email?, active? }`
-- Un docente inactivo bloquea horarios nuevos de sus comisiones (`400 INACTIVE_CATALOG_ITEM`) pero no los existentes.
-- **200** `{ teacher }` · **404** `NOT_FOUND` · **409** `TEACHER_EMAIL_IN_USE`
-
-**`DELETE /api/teachers/:id`** — ENCARGADO, baja lógica (`active=false`)
-- **200** `{ ok: true }` · **404** `NOT_FOUND`
-
-#### Comisiones (course offerings)
-
-Una comisión identifica **qué** se dicta y **quién**: `(semestre, materia, sección, docente?)`. Los bloques del grid siempre la referencian.
-
-**`GET /api/course-offerings?semesterId=&subjectId=&includeInactive=`** — Autenticado
-- `semesterId` requerido; `subjectId` e `includeInactive` (solo ENCARGADO) opcionales.
-- **200** `{ offerings: CourseOffering[] }` (orden `subject.code`, luego `section`)
-
-**`GET /api/course-offerings/:id`** — Autenticado · **200** `{ offering }` · **404** `NOT_FOUND`
-
-**`POST /api/course-offerings`** — ENCARGADO
-- Body: `{ semesterId, subjectId, section: string().min(1).max(20) → uppercase+trim, teacherId?: string.nullish(), type?: enum("CLASE","EXTRACURRICULAR","ACTIVIDAD") (default "CLASE"), note?: string().max(500).nullish() }`
-- Valida semestre/materia/docente (**404**) y que estén activos (`400 INACTIVE_CATALOG_ITEM`).
-- Duplicada (misma tupla completa) → **409** `OFFERING_ALREADY_EXISTS`. Misma materia+sección con **otro docente** es válida (comisión compartida).
-- **201** `{ offering }` · **400** `VALIDATION_ERROR` | `INACTIVE_CATALOG_ITEM`
-
-**`PATCH /api/course-offerings/:id`** — ENCARGADO (parcial)
-- Body: `{ teacherId?, section?, type?, active?, note? }`
-- Si cambia `section` o `teacherId`, revalida unicidad → **409** `OFFERING_ALREADY_EXISTS`.
-- **200** `{ offering }` · **400** | **404** | **409**
-
-**`DELETE /api/course-offerings/:id`** — ENCARGADO, baja lógica (`active=false`)
-- Los bloques ya asignados se conservan; la comisión inactiva no acepta bloques nuevos.
-- **200** `{ ok: true }` · **404** `NOT_FOUND`
-
-#### Turnos
-
-**`GET /api/time-slots`** — Autenticado
-- **200** `{ timeSlots: TimeSlot[] }` (orden `order` asc; 9 registros por defecto) · **401**
-
-#### Semestres
-
-**`GET /api/semesters`** — Autenticado
-- **200** `{ semesters: Semester[] }` (orden `startDate` desc) · **401**
-
-**`POST /api/semesters`** — ENCARGADO
-- Body: `{ name: string().min(2).max(20), startDate: coerce.date(), endDate: coerce.date() }` — `endDate` debe ser posterior a `startDate`.
-- **201** `{ semester }` (con `isActive:false`) · **400** `VALIDATION_ERROR`
-
-**`PATCH /api/semesters/:id`** — ENCARGADO (parcial)
-- Body: `{ name?, startDate?, endDate? }`
-- **200** `{ semester }` · **400** `VALIDATION_ERROR` · **404** `NOT_FOUND`
-
-**`POST /api/semesters/:id/activate`** — ENCARGADO
-- En una transacción: `updateMany({ isActive: false })` + `update(id, { isActive: true })`.
-- **200** `{ semester }` (con `isActive:true`) · **404** `NOT_FOUND`
-
-#### Schedules (bloques del grid)
-
-**`GET /api/schedules?classroomId=&semesterId=`** — Autenticado
-- Ambos query params **requeridos**; devuelve solo los del aula+semestre.
-- Cada bloque incluye `timeSlot`, `classroom`, `courseOffering` (con `subject` y `teacher`) y `assignedBy` embebidos. Orden por `dayOfWeek` asc, luego `timeSlot.order` asc.
-- **200** `{ schedules: Schedule[] }` · **400** `VALIDATION_ERROR` · **401**
-
-**`POST /api/schedules`** — Autenticado (autor = usuario actual)
-- Body: `{ classroomId, semesterId, courseOfferingId, dayOfWeek: int(1-6), timeSlotId, note?: string().max(500).nullish() }`
-- Validaciones en orden, dentro de una transacción:
-  1. Turno/aula/comisión existen → **404**.
-  2. Existe semestre activo → si no, **409** `NO_ACTIVE_SEMESTER`.
-  3. Aula `ACTIVA` sin mantenimiento abierto → **409** `CLASSROOM_UNAVAILABLE`.
-  4. Comisión activa, con materia/docente activos, y `semesterId == offering.semesterId` → **400** `INACTIVE_CATALOG_ITEM` | `SEMESTER_MISMATCH`.
-  5. Docente de la comisión libre ese día/turno → **409** `TEACHER_CONFLICT`.
-  6. Celda libre (**409** `RESERVATION_CONFLICT`) y comisión no simultánea (**409** `OFFERING_CONFLICT`).
-- **201** `{ schedule }` · **400** `VALIDATION_ERROR`
-
-**`PATCH /api/schedules/:id`** — Autor del schedule o ENCARGADO
-- Body parcial: `{ classroomId?, semesterId?, courseOfferingId?, dayOfWeek?, timeSlotId?, note? }`.
-- Si cambia la celda o la comisión, re-ejecuta las validaciones 3–6 (con `NOT id` para excluirse a sí mismo de los conflictos).
-- Ayudante no puede editar un schedule ajeno → **403**.
-- **200** `{ schedule }` · **400** `VALIDATION_ERROR` · **403** `FORBIDDEN` · **404** `NOT_FOUND`
-
-**`DELETE /api/schedules/:id`** — Autor o ENCARGADO
-- Ayudante no puede eliminar un schedule ajeno → **403**.
-- **200** `{ ok: true }` · **403** `FORBIDDEN` · **404** `NOT_FOUND`
-
-#### Anotaciones
-
-**`GET /api/annotations?classroomId=&from=&to=`** — Autenticado
-- `classroomId` requerido; `from`/`to` opcionales (ISO). `to` es **inclusivo**: incluye todo el día de la fecha indicada. Orden `date` desc.
-- **200** `{ annotations: Annotation[] }` · **400** `VALIDATION_ERROR` · **401**
-
-**`POST /api/annotations`** — Autenticado
-- Body: `{ classroomId, content: string().min(1).max(1000) }` (`userId` = usuario actual, `date = now()`).
-- **201** `{ annotation }` · **400** `VALIDATION_ERROR` · **404** `NOT_FOUND`
-
-**`DELETE /api/annotations/:id`** — Autor o ENCARGADO
-- **200** `{ ok: true }` · **403** `FORBIDDEN` (ayudante sobre ajena) · **404** `NOT_FOUND`
-
-#### Mantenimiento
-
-**`GET /api/maintenance?classroomId=&status=`** — Autenticado
-- Ambos opcionales (`status` ∈ `REPORTADO`/`EN_PROGRESO`/`COMPLETADO`). Orden `date` desc. Incluye `classroom` embebido.
-- **200** `{ maintenance: MaintenanceLog[] }` · **400** `VALIDATION_ERROR` · **401**
-
-**`POST /api/maintenance`** — Autenticado
-- Body: `{ classroomId, date: coerce.date() (día calendario), reason: string().min(3).max(500) }`.
-- Crea con `status: "REPORTADO"`. La fecha se normaliza a UTC medianoche.
-- **En la misma transacción**, si el aula estaba `ACTIVA` pasa a `EN_MANTENIMIENTO`; a partir de ese momento rechaza reservas nuevas (`409 CLASSROOM_UNAVAILABLE`).
-- **201** `{ maintenance }` · **400** `VALIDATION_ERROR` · **404** `NOT_FOUND`
-
-**`PATCH /api/maintenance/:id`** — ENCARGADO
-- Body: `{ status: enum("REPORTADO","EN_PROGRESO","COMPLETADO") }`.
-- Si el nuevo estado deja al aula sin mantenimientos abiertos, el aula vuelve automáticamente a `ACTIVA`.
-- **200** `{ maintenance }` · **400** `VALIDATION_ERROR` · **403** `FORBIDDEN` · **404** `NOT_FOUND`
-
-**`DELETE /api/maintenance/:id`** — ENCARGADO
-- Misma sincronización de estado que completar.
-- **200** `{ ok: true }` · **403** `FORBIDDEN` · **404** `NOT_FOUND`
-
-#### Estadísticas
-
-**`GET /api/stats/overview`** — Autenticado
-- **200** `StatsOverview`:
-  - `totalClassrooms` y `classroomsByType` cuentan solo aulas con `status != "INACTIVA"` (incluye `EN_MANTENIMIENTO` y `FUERA_SERVICIO`).
-  - `occupiedSlots` = schedules del semestre activo por aula (todo bloque cuenta; ya no existe el tipo `MANTENIMIENTO`).
-  - `totalSlots` = **dinámico**: `count(timeSlot) × 6 días` (con el seed por defecto: 9 × 6 = 54).
-  - `percentage` = redondeado a 2 decimales (0–100).
-  - `pendingMaintenance` = `MaintenanceLog` con `status != "COMPLETADO"`.
-  - Si no hay semestre activo, todos los `occupiedSlots`/`percentage` son 0.
-- **401** si no autenticado.
-
-#### Salud
-
-**`GET /api/health`** — Público
-- **200** `{ "status": "ok" }`
 
 ---
 
-## Tests
+## Endpoints — detalle
 
-Suite con **Vitest + Supertest** (`tests/`), ejecutable con `npm test`. **13 suites, 70 tests**. Cubre:
+#### Autenticación
 
-| Suite | Cobertura |
-|-------|-----------|
-| `auth.test.ts` | login correcto/inválido, validación de email, `/auth/me` con/sin token, token inválido |
-| `users.test.ts` | CRUD usuarios, permisos ENCARGADO, `EMAIL_IN_USE`, `CANNOT_DELETE_SELF` |
-| `subjects.test.ts` | CRUD materias, normalización de código, `SUBJECT_CODE_IN_USE`, reuso de código tras baja |
-| `teachers.test.ts` | CRUD docentes, `TEACHER_CODE_IN_USE`, `TEACHER_EMAIL_IN_USE`, baja lógica |
-| `course-offerings.test.ts` | CRUD comisiones, normalización de sección, duplicada (`OFFERING_ALREADY_EXISTS`), comisión compartida entre docentes, docente null |
-| `classrooms.test.ts` | CRUD aulas, cambio de `status`, filtro por estado, soft delete → `INACTIVA` |
-| `time-slots.test.ts` | listado de 9 turnos ordenados |
-| `semesters.test.ts` | CRUD + activación única en transacción |
-| `schedules.test.ts` | contrato nuevo (comisión), conflictos `RESERVATION_CONFLICT`, `TEACHER_CONFLICT`, `OFFERING_CONFLICT`, `SEMESTER_MISMATCH`, `NO_ACTIVE_SEMESTER`, permisos de autor/rol, embebido de comisión/docente/materia en respuesta |
-| `annotations.test.ts` | CRUD y permisos de autor |
-| `maintenance.test.ts` | creación por ayudante, estados solo encargado, sincronización aula `EN_MANTENIMIENTO` ↔ `ACTIVA`, bloqueo de reservas (`CLASSROOM_UNAVAILABLE`) |
-| `stats.test.ts` | estructura de `StatsOverview` y ocupación |
-| `rate-limit.test.ts` | `429 RATE_LIMIT_EXCEEDED` al superar el límite del login |
+- **`POST /auth/login`** `{ email, password }` → `200 {data:{token, user}}` · `401 AUTH_INVALID_CREDENTIALS|USER_INACTIVE` · `429`.
+- **`GET /auth/me`** · **`PATCH /auth/me`** · **`PATCH /auth/me/password`**.
 
-> Los tests usan la base real (`DATABASE_URL` del `.env`) y crean/limpian datos de prueba. Corren **secuenciales** (`fileParallelism: false`) porque comparten la BD; los hooks tienen timeout de 120s por la latencia de Neon. **No corras `npm test` contra la base de producción.**
+#### Usuarios, aulas, materias, docentes, turnos, semestres
+
+CRUD estándar según matriz de acceso. Detalles relevantes:
+
+- **Aulas**: soft delete → `status INACTIVA`. `PATCH /classrooms/:id` acepta `status`. Nuevo: **`GET /classrooms/:id/state?date=&timeSlotId=`** (ver Disponibilidad).
+- **Semestres**: `POST/PATCH` aceptan `workingDays?: number[]` (1–6, sin duplicados). `DELETE` falla con `SEMESTER_HAS_DEPENDENCIES` si tiene horarios o reservas; el activo no se elimina (`SEMESTER_ACTIVE`). `POST /semesters/:id/activate` en transacción.
+- **Turnos**: CRUD ENCARGADO con validación de orden único y borrado bloqueado si está en uso.
+- **Materias/Docentes**: baja lógica (`active=false`); inactivos no asignables a horarios nuevos.
+
+#### Schedules (planilla semanal — §4.3 del doc base)
+
+**`GET /schedules?classroomId=&semesterId=`** (ambos requeridos) → `200 {data: Schedule[]}` ordenado por día y turno.
+
+**`POST /schedules`** — body: `{classroomId, semesterId, subjectId, teacherId?, dayOfWeek, timeSlotId, note?}`. Validaciones dentro de transacción: turno/semestre/aula existen (`404`), aula disponible (`409 CLASSROOM_UNAVAILABLE`), catálogos activos (`400 INACTIVE_CATALOG_ITEM`), día hábil del semestre (`400 NON_WORKING_DAY`), celda libre vs schedules+reservas (`409 RESERVATION_CONFLICT`) y docente libre ese día+turno (`409 TEACHER_CONFLICT`). Unicidad BD como red de seguridad (P2002 → `RESERVATION_CONFLICT`).
+
+> Se puede planificar en **cualquier semestre** (activo o no); el chequeo de semestre activo solo aplica al estado en tiempo real del aula.
+
+**`PATCH /schedules/:id`** — parcial; re-ejecuta las validaciones solo sobre campos cambiados (excluyéndose a sí mismo de los conflictos). Autor o ENCARGADO.
+
+**`DELETE /schedules/:id`** — físico. Autor o ENCARGADO.
+
+#### Reservas (§5.2 y §4.5 del doc base)
+
+**`GET /reservations?status=&classroomId=&semesterId=&type=&page=&pageSize=`**
+- Ayudante: solo las propias. Encargado: todas. Orden `createdAt desc`.
+
+**`GET /reservations/:id`** — dueño o Encargado.
+
+**`POST /reservations`** — crea en `PENDIENTE`:
+```json
+{ "classroomId": "cls-d404", "semesterId": "sem-2026-a",
+  "type": "RECURRENTE",   "dayOfWeek": 3,            "timeSlotId": "ts-5" }
+{ "classroomId": "cls-d404", "semesterId": "sem-2026-a",
+  "type": "PUNTUAL", "date": "2026-11-20",           "timeSlotId": "ts-5" }
+```
+- RECURRENTE exige `dayOfWeek` (y rechaza `date`); PUNTUAL exige `date` (deriva su weekday; rechaza `dayOfWeek`). Zod valida la forma → `400 VALIDATION_ERROR`.
+- Negocio (transacción): semestre/aula/turno válidos, aula disponible, día hábil, fecha en rango (puntual) y celda libre → `409 RESERVATION_CONFLICT` / `400 NON_WORKING_DAY` / `400 DATE_OUTSIDE_SEMESTER`.
+
+**`PATCH /reservations/:id`** — cambia `classroomId`, `timeSlotId`, `dayOfWeek`, `date`, `note` (nunca `type` ni `status`). Revalida ocupación de la celda destino. Dueño mientras `PENDIENTE`; Encargado salvo `CANCELADA` → `409 RESERVATION_NOT_EDITABLE` / `403 FORBIDDEN`.
+
+**`PATCH /reservations/:id/status`** — `{ status: "CONFIRMADA" | "CANCELADA" }`:
+- `CONFIRMADA` solo desde `PENDIENTE` y **revalidando disponibilidad** (si alguien ocupó la celda mientras tanto → `409 RESERVATION_CONFLICT`).
+- `CANCELADA` desde `PENDIENTE` o `CONFIRMADA`; estado terminal.
+- Transición inválida → `409 INVALID_RESERVATION_TRANSITION`.
+- Permisos: Encargado cualquier transición; Ayudante dueño solo cancelar suya en `PENDIENTE`.
+
+**`DELETE /reservations/:id`** — ENCARGADO; solo reservas ya `CANCELADA` (limpieza). `204`.
+
+#### Disponibilidad (§5.4 y §7 del doc base)
+
+**`GET /classrooms/:id/state?date=&timeSlotId=`** — estado puntual de un aula.
+- Defaults: hoy + turno actual autodetectado por hora (fuera de rango → `400 VALIDATION_ERROR` pidiendo `timeSlotId` explícito).
+- Prioridad de evaluación: domingo → `LIBRE` (razón) · aula no `ACTIVA` → `MANTENIMIENTO` · mantenimiento abierto → `MANTENIMIENTO` · schedule del semestre activo → `OCUPADA (kind=SCHEDULE)` · reserva activa recurrente/puntual ese día → `OCUPADA (kind=RESERVATION)` · resto `LIBRE`.
+
+**`GET /availability/grid?semesterId=&classroomId=&includePuntual=true`** — Tabla Semanal completa:
+```json
+{ "data": { "semester": {"id","name","workingDays","startDate","endDate"},
+  "timeSlots": [ ... 9 turnos ... ],
+  "classrooms": [ { "classroom": {...}, "maintenance": [...],
+    "cells": [ { "dayOfWeek": 1, "timeSlotId": "ts-1", "entry": null |
+      { "kind": "SCHEDULE", "scheduleId", "subject", "teacher" } |
+      { "kind": "RESERVATION", "reservationId", "type", "status", "date" } } ] } ] } }
+```
+- Celdas solo para los días hábiles del semestre. `includePuntual=false` excluye reservas puntuales. Aulas `INACTIVA` excluidas salvo filtrado por `classroomId`.
+
+#### Anotaciones, Mantenimiento y Stats
+
+- **`GET /annotations?classroomId=&from=&to=`** · **`POST /annotations`** `{classroomId, content}` · **`DELETE /annotations/:id`** (autor o Encargado).
+- **Mantenimiento**: `GET /maintenance?classroomId=&status=` · `POST` (crea `REPORTADO`, aula → `EN_MANTENIMIENTO`, bloquea reservas §8) · `PATCH /:id {status}` (solo Encargado; al quedar sin abiertos, aula → `ACTIVA`) · `DELETE /:id`.
+- **`GET /stats/overview`** → `StatsOverview` (ver tipos). `reservationsByStatus` incluye solo estados con al menos una reserva. Ocupación = bloques de planilla del semestre activo sobre `totalSlots = turnos × 6` (constante `DAYS_PER_WEEK`; no deriva de `workingDays`). Porcentaje redondeado a 2 decimales; sin semestre activo, todo en 0.
+
+#### Salud
+
+**`GET /health`** — público:
+- BD accesible → `200 { data: { status: "ok", db: "up", uptime } }`.
+- BD caída → `503 { data: { status: "degraded", db: "down", uptime } }`.
+
+---
+
+## Verificación (smoke test)
+
+La suite automatizada (Vitest) fue retirada durante la realineación; el contrato se verifica con un smoke test manual contra el build compilado:
+
+```bash
+npm run build && npm start
+```
+
+Checklist (14 checks, todos ejecutados y en verde tras la realineación):
+
+1. `GET /api/health` → `db: up`
+2. Login admin y ayudante → tokens
+3. Ayudante crea reserva RECURRENTE en celda libre → `201 PENDIENTE`
+4. Misma celda otra vez → `409 RESERVATION_CONFLICT`
+5. Admin confirma → `CONFIRMADA`; ayudante confirma ajena → `403 FORBIDDEN`
+6. `POST /schedules` sobre esa celda confirmada → `409 RESERVATION_CONFLICT`
+7. `GET /classrooms/:id/state` → `OCUPADA` por `RESERVATION`
+8. `GET /availability/grid` → 8 aulas, celdas pobladas (>100)
+9. PUNTUAL válida → `201`; fecha fuera del semestre → `400 DATE_OUTSIDE_SEMESTER`; domingo → `400 NON_WORKING_DAY`
+10. `GET /api/course-offerings` → `404` (endpoint eliminado)
+
+> Ejecutar contra base de desarrollo: los pasos crean reservas que luego se cancelan y borran al final del script.
 
 ---
 
 ## Datos maestros configurables (`prisma/seed.config.ts`)
 
-El seed **no** inventa datos: importa todo desde `seed.config.ts`, que la institución edita **sin tocar lógica**.
+El seed no inventa datos: importa todo de `seed.config.ts`, que la institución edita sin tocar lógica.
 
-| Export | Tipo | Contenido |
-|--------|------|-----------|
-| `TIME_SLOTS` | `TimeSlotSeed[]` | 9 turnos con `id`, `label`, `startTime`, `endTime`, `order` (1–9 únicos) |
-| `CLASSROOMS` | `ClassroomSeed[]` | 8 aulas con `id`, `code` (único), `name`, `type`, `capacity?`, `location?` |
-| `SEMESTER` | `SemesterSeed` | Semestre con `id`, `name`, `startDate`, `endDate` |
-| `TEACHERS` | `TeacherSeed[]` | 30 docentes con `id`, `code` (único, slug del apellido), `name`, `email?`, `subjectCodes?` (referencia informativa) |
-| `SUBJECTS` | `SubjectSeed[]` | 32 materias con `id`, `code` (único), `name`, `type?` (`CLASE`/`EXTRACURRICULAR`/`ACTIVIDAD`) |
-| `BLOCKS` | `BlockSeed[]` | **110 bloques** de la grilla real: `{ classroomCode, dayOfWeek, timeSlotOrder, subjectCode, section, teacherCode? }` — la fuente de las comisiones y los horarios |
-| `ADMIN` | `AdminSeed` | Usuario encargado con `id`, `name`, `email`, `password`, `role` |
-| `AYUDANTES` | `AdminSeed[]` | Usuarios ayudantes iniciales |
-
-Datos por defecto:
-
-- **Turnos**: 9 períodos de `07:15` a `21:45`.
-- **Aulas**: `D201`, `D302`, `D304`, `E112`, `D401`, `D402`, `D403`, `D404` (con tipo y capacidad).
-- **Semestre**: `2026-A` (2026-08-01 → 2026-12-18), activo.
-- **Docentes**: 30, códigos generados como slug del apellido (`SORIA`, `GUTIERREZ`, …). El docente genérico `INGLES` agrupa las cátedras de inglés; `EXCEL` y `AULA-COMUN` van sin docente.
-- **Materias**: 29 regulares (`DD111`, `MO211`, …) + `INGLES`, `EXCEL` (extracurriculares, sección = grupo, ej. `10/4`) + `AULA-COMUN` (actividad).
-- **Comisiones**: se **derivan** de `BLOCKS` (64 en total), no se declaran a mano.
-- **Admin**: `admin@institucion.edu` / `admin123` (rol `ENCARGADO`) + 4 ayudantes.
+| Export | Contenido |
+|--------|-----------|
+| `TIME_SLOTS` | 9 turnos oficiales (`ts-1` … `ts-9`) |
+| `CLASSROOMS` | 8 aulas (`D201`, `D302`, `D304`, `E112`, `D401`–`D404`) |
+| `SEMESTER` | `2026-A` (2026-08-01 → 2026-12-18), `workingDays: [1..6]` |
+| `TEACHERS` | 30 docentes (código slug del apellido; `INGLES` agrupa cátedras) |
+| `SUBJECTS` | 32 materias (`DD111`, `MO211`, … + `INGLES`, `EXCEL`, `AULA-COMUN`) |
+| `BLOCKS` | **110 bloques reales**: `{ classroomCode, dayOfWeek, timeSlotOrder, subjectCode, teacherCode? }` |
+| `ADMIN` / `AYUDANTES` | `admin@institucion.edu` / `admin123` (ENCARGADO) + 4 ayudantes (`ayudante123`) |
 
 Comportamiento:
 
-- **Idempotente**: re-ejecutar `npm run prisma:seed` no duplica filas; hace `upsert` sobre catálogos, comisiones y bloques, y reactiva el semestre de configuración. Verifica conteos al final. **Nunca borra** datos operacionales que no estén en el config.
-- Cambiar `name`/`code`/fechas/contraseñas → se aplica al re-ejecutar el seed.
-- **Atención**: el seed sobrescribe la contraseña del admin en cada run.
-- Los `id` del seed (`cls-d302`, `tea-soria`, `sub-dd111`, `off-*`, `usr-admin`, …) son estables: renombrarlos no migra referencias existentes.
-- **Convención de comisiones compartidas**: cuando dos docentes dictan la misma materia+sección (ej. `DD311-A` con Soria y DeLaQuintana), se crean dos comisiones paralelas. Cuando un mismo grupo aparece simultáneo en dos aulas (caso Inglés `10/4` en D302/D304), el seed lo modela como secciones `10/4` y `10/4-B`.
+- **Idempotente**: upserts sobre catálogos y bloques (clave compuesta `classroomId_semesterId_dayOfWeek_timeSlotId`). Re-ejecutar no duplica ni borra datos operacionales.
+- **Valida antes de escribir**: referencias existentes, celdas únicas por aula y **docente sin dobles turnos entre aulas** — un dataset inválido aborta el seed con mensaje explícito.
+- Verifica conteos finales (aulas/docentes/materias/turnos/bloques).
+- El admin re-hashea su contraseña en cada run.
+- Los `id` son estables (`cls-d302`, `tea-soria`, `sub-dd111`, …).
 
 ---
 
-## Notas de implementación (comportamiento real)
+## Notas de implementación
 
-Particularidades de la implementación actual, documentadas para que el README sea una guía fiel:
-
-1. **`NO_ACTIVE_SEMESTER`** se lanza en `POST /schedules` solo cuando **no existe ningún** semestre activo. Se permite crear un schedule en un semestre **inactivo** si hay al menos un semestre activo (planificación futura). En `PATCH /schedules`, el chequeo solo corre si cambia la celda manteniendo el semestre.
-2. **Transacciones con `timeout: 30s / maxWait: 10s`** (`TX_OPTIONS`): las validaciones anti-conflicto corren en transacciones interactivas de Prisma que hacen ~6 roundtrips a Neon; el default de 5s producía `P2028` intermitente (HTTP 500). Aplica a los servicios de schedules y mantenimiento.
-3. **Normalización de códigos**: `Subject.code`, `Teacher.code`, `Classroom.code` y `CourseOffering.section` se guardan **en mayúsculas** (`transform` Zod + servicio); emails de docentes se lowercasean. La unicidad es insensible a mayúsculas en la práctica porque siempre se normaliza antes de escribir.
-4. **Conflictos por P2002**: el mapeo usa `meta.target` (`utils/dbErrors.ts`) para distinguir `OFFERING_CONFLICT` (comisión simultánea) de `RESERVATION_CONFLICT` (celda). Los conflictos de docente se detectan **antes** del INSERT (query dentro de la transacción), no por constraint.
-5. **Sincronización aula ↔ mantenimiento** (`syncClassroomAvailability`): idempotente y conservadora — solo alterna entre `ACTIVA` y `EN_MANTENIMIENTO`; nunca toca `INACTIVA` ni `FUERA_SERVICIO`.
-6. **Zod 4**: se usa la sintaxis nueva `z.email()` (en lugar de `z.string().email()` de Zod 3).
-7. **Seed**: el `upsert` del admin re-hashea la contraseña en cada ejecución (ver sección de seed).
-8. **`.env` actual** usa una URL **pooled** de Neon con `channel_binding=require`, aunque `PLAN.md` recomienda la conexión **directa** para Prisma. Verifica cuál te da mejor resultado con `npx prisma migrate dev`.
-9. **Borrado de ruta no encontrada**: `notFoundHandler` devuelve `404 NOT_FOUND` con mensaje "Ruta no encontrada".
-10. **Login anti-enumeración**: cuando el email no existe se ejecuta igualmente `bcrypt.compare` contra un hash dummy.
-11. **JWT**: el token solo lleva `sub`; el rol se lee siempre de BD, así un cambio de rol no queda congelado en tokens emitidos.
-12. **Vitest**: `hookTimeout: 120000` global (los `beforeAll` crean catálogos completos contra la API remota).
+1. **Reglas compartidas**: `slotAvailability.service.ts` exporta primitivas (`assertRecurringSlotAvailable`, `assertPunctualSlotAvailable`, `assertNoTeacherConflict`, `assertClassroomBookable`, etc.) usadas por schedules **y** reservations; ninguna operación escribe sin pasar por ellas dentro de `$transaction(TX_OPTIONS)` (`timeout 30s / maxWait 10s` — necesario por latencia Neon).
+2. **Choque inverso puntual↔semanal**: una reserva puntual bloquea su día+turno para toda la semana (si ese día está en `workingDays`) y viceversa: un bloque semanal impide puntuales en cualquier fecha de ese weekday.
+3. **Confirmación con revalidación**: confirmar una reserva vuelve a correr las verificaciones de ocupación; evita doble ocupación si dos pendientes se crearon antes de que la lógica lo impidiera o si llegó un schedule entre medio.
+4. **Conflictos P2002**: mapeo por `meta.target` (`utils/dbErrors.ts`) → la unicidad de la celda del schedule produce `409 RESERVATION_CONFLICT`. Los conflictos de docente se detectan por query previa, no por constraint.
+5. **Estado del aula vs semestre activo**: se permite planificar/reservar en cualquier semestre; el estado en tiempo real (`/:id/state`) evalúa solo el activo.
+6. **Zod 4**: sintaxis `z.email()`; validación condicional recurrente/puntual con `superRefine`.
+7. **Login anti-enumeración**: bcrypt dummy cuando el email no existe.
+8. **JWT**: solo lleva `sub`; el rol se lee de BD en cada request.
 
 ---
 
-## Resumen de la migración del modelo de datos (2026-08)
+## Realineación al documento base (2026-08)
 
-Implementación completa de [`PLAN_MIGRACION_MODELO_DATOS.md`](../PLAN_MIGRACION_MODELO_DATOS.md) sobre [`NORMALIZACION_MODELO_DATOS.md`](../NORMALIZACION_MODELO_DATOS.md). Corte directo sin ventana de compatibilidad.
+Implementación completa de [`PLAN_REALINEACION_MODELO.md`](./PLAN_REALINEACION_MODELO.md), migración regenerada desde cero (`20260823065113_init`).
 
 ### Antes → Después
 
 | Concepto | Antes | Después |
 |----------|-------|---------|
-| Bloque de horario | Texto libre (`type` CLASE/ACTIVIDAD/MANTENIMIENTO, `title`, `teacher`) | Referencia a comisión (`courseOfferingId`) + `note` |
-| Qué se dicta | Implícito en el título | `Subject {code, name}` en catálogo |
-| Quién lo dicta | String libre por celda | `Teacher {code, name, email}` en catálogo |
-| Comisión | No existía | `CourseOffering (semestre, materia, sección, docente?)` |
-| Estado de aula | Boolean `active` | Enum `status`: `ACTIVA` · `INACTIVA` · `EN_MANTENIMIENTO` · `FUERA_SERVICIO` |
-| Mantenimiento | Schedule con `type=MANTENIMIENTO` | Proceso propio (`MaintenanceLog`) que sincroniza el estado del aula |
-| Conflictos validados | Celda ocupada | Celda + comisión simultánea + docente simultáneo + semestre/comisión + disponibilidad de aula |
-| Semestre activo único | Por convención (transacción) | Garantizado por índice parcial único en BD |
+| Bloque de horario | Referenciaba una comisión (`courseOfferingId`) obligatoria | Materia + docente directos (`subjectId`, `teacherId?`) |
+| Comisión | `CourseOffering` (semestre+materia+sección+docente) | **Eliminada** |
+| Reservas | No existían | `Reservation` con ciclo de vida PENDIENTE→CONFIRMADA/CANCELADA, RECURRENTE/PUNTUAL |
+| Disponibilidad | Inexistente | `GET /classrooms/:id/state` + `GET /availability/grid` |
+| Días hábiles | Fijos L–S | Configurables por semestre (`workingDays`) |
 
-### Migraciones aplicadas
+### Checklist breaking para el frontend (`labmanage-web`)
 
-1. `20260814232520_init` · 2. `20260814233431_capacity_optional` (previas)
-3. `20260821192348_normalize_data_model` — nuevos modelos/catálogos, enums, constraints e índice parcial de semestre activo (SQL manual)
-4. `20260821193600_offering_teacher_unique` — unicidad de comisión incluye `teacherId` para permitir comisiones compartidas entre docentes
-
-### Anomalías reales de los datos resueltas
-
-- **Comisiones con dos docentes** (DD311-A, DD111-B/C, IT110-A, MO311-A): modeladas como comisiones paralelas gracias a la clave única de 4 columnas.
-- **Inglés (10/4) simultáneo en D302 y D304** (lunes 4° período): grupos paralelos reales → secciones `10/4` (D302) y `10/4-B` (D304). Si la institución usa otra convención, se corrige vía API.
-
-### Checklist de cambios breaking para el frontend (`labmanage-web`)
-
-- [ ] Reemplazar `schedule.type/title/teacher` por `schedule.courseOffering {subject, teacher, section, type}` en grid y formularios.
-- [ ] Formulario de bloques: selects encadenados materia → comisión (`GET /course-offerings?semesterId=`) en lugar de texto libre.
-- [ ] Eliminar la opción `MANTENIMIENTO` del formulario de horarios; usar la vista de mantenimiento existente.
-- [ ] `classroom.active` → `classroom.status` (badges/filtros); nuevo filtro `?status=` en `GET /classrooms`.
-- [ ] Nuevas pantallas o pestañas de catálogo: materias, docentes y comisiones (CRUD ENCARGADO).
-- [ ] Actualizar `web/src/lib/types.ts` con los tipos de la sección [Tipos de respuesta](#tipos-de-respuesta).
-- [ ] Manejar los nuevos códigos de error (`TEACHER_CONFLICT`, `OFFERING_CONFLICT`, `CLASSROOM_UNAVAILABLE`, `SEMESTER_MISMATCH`, `INACTIVE_CATALOG_ITEM`).
+- [ ] Eliminar selects de comisión: el formulario de bloques ahora envía `subjectId` + `teacherId?` directos.
+- [ ] Nueva pantalla de reservas: crear (ayudante), confirmar/cancelar (encargado), filtros por estado.
+- [ ] Consumir `GET /availability/grid` para la Tabla Semanal y `GET /classrooms/:id/state` para el estado Libre/Ocupada/Mantenimiento.
+- [ ] Actualizar `web/src/lib/types.ts` con los tipos de este README (ya no existen `CourseOffering*`; nuevos `Reservation`, `ClassroomStateResult`, grilla).
+- [ ] Manejar los nuevos errores: `NON_WORKING_DAY`, `DATE_OUTSIDE_SEMESTER`, `INVALID_RESERVATION_TRANSITION`, `RESERVATION_NOT_EDITABLE`.
+- [ ] Semestres: agregar editor de `workingDays`.
 
 ---
 
