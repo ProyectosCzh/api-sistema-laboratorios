@@ -25,30 +25,37 @@ enum ClassroomStatus {
   FUERA_SERVICIO
 }
 
-enum CourseOfferingType {
-  CLASE
-  EXTRACURRICULAR
-  ACTIVIDAD
-}
-
 enum MaintenanceStatus {
   REPORTADO
   EN_PROGRESO
   COMPLETADO
 }
 
+enum ReservationType {
+  RECURRENTE
+  PUNTUAL
+}
+
+enum ReservationStatus {
+  PENDIENTE
+  CONFIRMADA
+  CANCELADA
+}
+
 model User {
-  id           String          @id @default(cuid())
+  id           String           @id @default(cuid())
   name         String
-  email        String          @unique
+  email        String           @unique
   passwordHash String
-  role         UserRole        @default(AYUDANTE)
-  active       Boolean         @default(true)
-  createdAt    DateTime        @default(now())
-  updatedAt    DateTime        @updatedAt
+  role         UserRole         @default(AYUDANTE)
+  active       Boolean          @default(true)
+  createdAt    DateTime         @default(now())
+  updatedAt    DateTime         @updatedAt
   schedules    Schedule[]
   annotations  Annotation[]
   maintenance  MaintenanceLog[]
+  requestedReservations Reservation[] @relation("ReservationRequester")
+  resolvedReservations  Reservation[] @relation("ReservationResolver")
 }
 
 model Classroom {
@@ -64,25 +71,28 @@ model Classroom {
   schedules   Schedule[]
   annotations Annotation[]
   maintenance MaintenanceLog[]
+  reservations Reservation[]
 }
 
 model TimeSlot {
-  id        String     @id @default(cuid())
+  id        String        @id @default(cuid())
   label     String
   startTime String
   endTime   String
-  order     Int        @unique
+  order     Int           @unique
   schedules Schedule[]
+  reservations Reservation[]
 }
 
 model Semester {
-  id            String     @id @default(cuid())
-  name          String     @unique
+  id            String        @id @default(cuid())
+  name          String        @unique
   startDate     DateTime
   endDate       DateTime
-  isActive      Boolean    @default(false)
+  workingDays   Int[]         @default([1, 2, 3, 4, 5, 6])
+  isActive      Boolean       @default(false)
   schedules     Schedule[]
-  offerings     CourseOffering[]
+  reservations  Reservation[]
 
   @@index([isActive])
 }
@@ -95,7 +105,7 @@ model Teacher {
   active         Boolean          @default(true)
   createdAt      DateTime         @default(now())
   updatedAt      DateTime         @updatedAt
-  offerings      CourseOffering[]
+  schedules      Schedule[]
 }
 
 model Subject {
@@ -105,54 +115,65 @@ model Subject {
   active         Boolean          @default(true)
   createdAt      DateTime         @default(now())
   updatedAt      DateTime         @updatedAt
-  offerings      CourseOffering[]
+  schedules      Schedule[]
 }
 
-model CourseOffering {
-  id         String             @id @default(cuid())
-  semesterId String
-  subjectId  String
-  teacherId  String?
-  section    String
-  type       CourseOfferingType @default(CLASE)
-  active     Boolean            @default(true)
-  note       String?
-  createdAt  DateTime           @default(now())
-  updatedAt  DateTime           @updatedAt
+/// Bloque academico de la planilla semanal: una materia (con docente opcional)
+/// ocupa un aula en un dia y turno durante todo el semestre.
+model Schedule {
+  id            String   @id @default(cuid())
+  classroomId   String
+  semesterId    String
+  subjectId     String
+  teacherId     String?
+  dayOfWeek     Int
+  timeSlotId    String
+  note          String?
+  assignedById  String
+  createdAt     DateTime @default(now())
+  updatedAt     DateTime @updatedAt
 
-  semester  Semester  @relation(fields: [semesterId], references: [id], onDelete: Cascade)
-  subject   Subject   @relation(fields: [subjectId], references: [id])
-  teacher   Teacher?  @relation(fields: [teacherId], references: [id])
-  schedules Schedule[]
+  classroom  Classroom @relation(fields: [classroomId], references: [id], onDelete: Cascade)
+  semester   Semester  @relation(fields: [semesterId], references: [id], onDelete: Cascade)
+  subject    Subject   @relation(fields: [subjectId], references: [id], onDelete: Restrict)
+  teacher    Teacher?  @relation(fields: [teacherId], references: [id], onDelete: SetNull)
+  timeSlot   TimeSlot  @relation(fields: [timeSlotId], references: [id])
+  assignedBy User      @relation(fields: [assignedById], references: [id], onDelete: Restrict)
 
-  @@unique([semesterId, subjectId, section, teacherId])
+  @@unique([classroomId, semesterId, dayOfWeek, timeSlotId])
   @@index([semesterId])
   @@index([subjectId])
   @@index([teacherId])
 }
 
-model Schedule {
-  id               String   @id @default(cuid())
-  classroomId      String
-  semesterId       String
-  courseOfferingId String
-  dayOfWeek        Int
-  timeSlotId       String
-  note             String?
-  assignedById     String
-  createdAt        DateTime @default(now())
-  updatedAt        DateTime @updatedAt
+/// Reserva operativa registrada por el personal.
+/// RECURRENTE: ocupa la celda dayOfWeek + turno durante todo el semestre.
+/// PUNTUAL: ocupa solo la fecha indicada (date) en el turno indicado.
+model Reservation {
+  id            String            @id @default(cuid())
+  classroomId   String
+  semesterId    String
+  type          ReservationType
+  dayOfWeek     Int?
+  date          DateTime?
+  timeSlotId    String
+  status        ReservationStatus @default(PENDIENTE)
+  note          String?
+  requestedById String
+  resolvedById  String?
+  createdAt     DateTime          @default(now())
+  updatedAt     DateTime          @updatedAt
 
-  classroom      Classroom      @relation(fields: [classroomId], references: [id], onDelete: Cascade)
-  semester       Semester       @relation(fields: [semesterId], references: [id], onDelete: Cascade)
-  courseOffering CourseOffering @relation(fields: [courseOfferingId], references: [id], onDelete: Cascade)
-  timeSlot       TimeSlot       @relation(fields: [timeSlotId], references: [id])
-  assignedBy     User           @relation(fields: [assignedById], references: [id])
+  classroom   Classroom @relation(fields: [classroomId], references: [id], onDelete: Cascade)
+  semester    Semester  @relation(fields: [semesterId], references: [id], onDelete: Cascade)
+  timeSlot    TimeSlot  @relation(fields: [timeSlotId], references: [id])
+  requestedBy User      @relation("ReservationRequester", fields: [requestedById], references: [id], onDelete: Restrict)
+  resolvedBy  User?     @relation("ReservationResolver", fields: [resolvedById], references: [id], onDelete: SetNull)
 
-  @@unique([classroomId, semesterId, dayOfWeek, timeSlotId])
-  @@unique([courseOfferingId, dayOfWeek, timeSlotId])
-  @@index([classroomId, semesterId])
-  @@index([courseOfferingId])
+  @@index([classroomId, semesterId, status])
+  @@index([semesterId])
+  @@index([requestedById])
+  @@index([status])
 }
 
 model Annotation {
@@ -163,6 +184,8 @@ model Annotation {
   content     String
   classroom   Classroom @relation(fields: [classroomId], references: [id], onDelete: Cascade)
   user        User      @relation(fields: [userId], references: [id])
+
+  @@index([classroomId, date])
 }
 
 model MaintenanceLog {

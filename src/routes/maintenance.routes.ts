@@ -1,56 +1,73 @@
 import { Router } from "express";
-import { z } from "zod";
-import { validate } from "../middleware/validate";
 import { requireAuth, requireRole } from "../middleware/auth";
+import { validateBody, validateParams, validateQuery, getQuery, getParams } from "../middleware/validate";
+import { ok, paginated, noContent } from "../utils/responses";
 import * as maintenanceService from "../services/maintenance.service";
+import type { ListMaintenanceQuery, CreateMaintenanceInput, UpdateMaintenanceInput } from "../validators/maintenance.schema";
+import type { ListMaintenanceOptions } from "../services/maintenance.service";
+import * as validators from "../validators/maintenance.schema";
 
 const router = Router();
 
-const listMaintenanceSchema = z.object({
-  classroomId: z.string().min(1).optional(),
-  status: z.enum(["REPORTADO", "EN_PROGRESO", "COMPLETADO"]).optional(),
-});
-
-router.get("/", requireAuth, validate(listMaintenanceSchema, "query"), async (req, res, next) => {
+router.get("/", requireAuth, validateQuery(validators.listMaintenanceQuerySchema), async (req, res, next) => {
   try {
-    const maintenance = await maintenanceService.listMaintenance(req.query.classroomId as string | undefined, req.query.status as "REPORTADO" | "EN_PROGRESO" | "COMPLETADO" | undefined);
-    res.status(200).json({ maintenance });
+    const query = getQuery<ListMaintenanceQuery>(req);
+    const opts: ListMaintenanceOptions = {
+      classroomId: query.classroomId,
+      status: query.status,
+      page: query.page,
+      pageSize: query.pageSize,
+    };
+    const result = await maintenanceService.listMaintenance(opts);
+    paginated(res, result.items, result.meta);
   } catch (e) {
     next(e);
   }
 });
 
-const createMaintenanceSchema = z.object({
-  classroomId: z.string().min(1),
-  date: z.coerce.date(),
-  reason: z.string().min(3).max(500).trim(),
-});
-
-router.post("/", requireAuth, validate(createMaintenanceSchema), async (req, res, next) => {
+router.get("/:id", requireAuth, validateParams(validators.idParamsSchema), async (req, res, next) => {
   try {
-    const maintenance = await maintenanceService.createMaintenance(req.body.classroomId, new Date(req.body.date), req.body.reason, req.user!.id);
-    res.status(201).json({ maintenance });
+    const { id } = getParams(req);
+    const maintenance = await maintenanceService.getMaintenance(id);
+    ok(res, { maintenance }, 200);
   } catch (e) {
     next(e);
   }
 });
 
-router.patch("/:id", requireAuth, requireRole("ENCARGADO"), validate(z.object({ id: z.string().min(1) }), "params"), validate(z.object({ status: z.enum(["REPORTADO", "EN_PROGRESO", "COMPLETADO"]) })), async (req, res, next) => {
+router.post("/", requireAuth, validateBody(validators.createMaintenanceSchema), async (req, res, next) => {
   try {
-    const maintenance = await maintenanceService.updateMaintenance(req.params.id as string, req.body.status);
-    res.status(200).json({ maintenance });
+    const body = getBody<CreateMaintenanceInput>(req);
+    const maintenance = await maintenanceService.createMaintenance(body.classroomId, body.date, body.reason, req.user!.id);
+    ok(res, { maintenance }, 201);
   } catch (e) {
     next(e);
   }
 });
 
-router.delete("/:id", requireAuth, requireRole("ENCARGADO"), validate(z.object({ id: z.string().min(1) }), "params"), async (req, res, next) => {
+router.patch("/:id", requireAuth, requireRole("ENCARGADO"), validateParams(validators.idParamsSchema), validateBody(validators.updateMaintenanceSchema), async (req, res, next) => {
   try {
-    await maintenanceService.deleteMaintenance(req.params.id as string);
-    res.status(200).json({ ok: true });
+    const { id } = getParams(req);
+    const body = getBody<UpdateMaintenanceInput>(req);
+    const maintenance = await maintenanceService.updateMaintenance(id, body.status);
+    ok(res, { maintenance }, 200);
   } catch (e) {
     next(e);
   }
 });
+
+router.delete("/:id", requireAuth, requireRole("ENCARGADO"), validateParams(validators.idParamsSchema), async (req, res, next) => {
+  try {
+    const { id } = getParams(req);
+    await maintenanceService.deleteMaintenance(id);
+    noContent(res);
+  } catch (e) {
+    next(e);
+  }
+});
+
+function getBody<T>(req: import("express").Request): T {
+  return req.validated?.body as T;
+}
 
 export default router;

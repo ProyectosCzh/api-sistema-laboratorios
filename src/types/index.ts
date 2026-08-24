@@ -1,8 +1,9 @@
 export type UserRole = "ENCARGADO" | "AYUDANTE";
 export type ClassroomType = "LAB_COMPUTACION" | "LAB_GENERAL" | "AULA";
 export type ClassroomStatus = "ACTIVA" | "INACTIVA" | "EN_MANTENIMIENTO" | "FUERA_SERVICIO";
-export type CourseOfferingType = "CLASE" | "EXTRACURRICULAR" | "ACTIVIDAD";
 export type MaintenanceStatus = "REPORTADO" | "EN_PROGRESO" | "COMPLETADO";
+export type ReservationType = "RECURRENTE" | "PUNTUAL";
+export type ReservationStatus = "PENDIENTE" | "CONFIRMADA" | "CANCELADA";
 
 export interface User {
   id: string;
@@ -39,6 +40,7 @@ export interface Semester {
   name: string;
   startDate: string;
   endDate: string;
+  workingDays: number[];
   isActive: boolean;
 }
 
@@ -61,36 +63,101 @@ export interface Subject {
   updatedAt: string;
 }
 
-export type CourseOfferingSummary = {
+export interface SubjectSummary {
   id: string;
-  semesterId: string;
-  section: string;
-  type: CourseOfferingType;
-  subject: { id: string; code: string; name: string };
-  teacher: { id: string; code: string; name: string } | null;
-};
-
-export interface CourseOffering extends CourseOfferingSummary {
-  note: string | null;
-  active: boolean;
-  createdAt: string;
-  updatedAt: string;
+  code: string;
+  name: string;
 }
+
+export interface TeacherSummary {
+  id: string;
+  code: string;
+  name: string;
+}
+
+export type ReservationRequester = { id: string; name: string };
+export type ReservationResolver = { id: string; name: string };
 
 export interface Schedule {
   id: string;
   classroomId: string;
   classroom: { id: string; code: string; name: string };
   semesterId: string;
+  subjectId: string;
+  subject: SubjectSummary;
+  teacherId: string | null;
+  teacher: TeacherSummary | null;
   dayOfWeek: number;
   timeSlotId: string;
   timeSlot: TimeSlot;
-  courseOfferingId: string;
-  courseOffering: CourseOfferingSummary;
   note: string | null;
   assignedById: string;
   assignedBy: { id: string; name: string };
   updatedAt: string;
+}
+
+export interface Reservation {
+  id: string;
+  classroomId: string;
+  classroom: { id: string; code: string; name: string };
+  semesterId: string;
+  type: ReservationType;
+  dayOfWeek: number | null;
+  date: string | null;
+  timeSlotId: string;
+  timeSlot: TimeSlot;
+  status: ReservationStatus;
+  note: string | null;
+  requestedById: string;
+  requestedBy: ReservationRequester;
+  resolvedById: string | null;
+  resolvedBy: ReservationResolver | null;
+  createdAt: string;
+  updatedAt: string;
+}
+
+/// Estado puntual de un aula según el documento base (sección 5.4)
+export type ClassroomAvailabilityState = "LIBRE" | "OCUPADA" | "MANTENIMIENTO";
+
+export interface ClassroomStateResult {
+  classroomId: string;
+  classroom: { id: string; code: string; name: string };
+  date: string;
+  dayOfWeek: number;
+  timeSlotId: string;
+  state: ClassroomAvailabilityState;
+  reason?: string;
+  occupiedBy?:
+    | { kind: "SCHEDULE"; schedule: Schedule }
+    | { kind: "RESERVATION"; reservation: Reservation };
+}
+
+export type GridEntryKind = "SCHEDULE" | "RESERVATION";
+
+export interface AvailabilityGridCell {
+  dayOfWeek: number;
+  timeSlotId: string;
+  entry:
+    | null
+    | { kind: "SCHEDULE"; scheduleId: string; subject: SubjectSummary; teacher: TeacherSummary | null }
+    | {
+        kind: "RESERVATION";
+        reservationId: string;
+        type: ReservationType;
+        status: ReservationStatus;
+        date: string | null;
+      };
+}
+
+export interface AvailabilityGridClassroom {
+  classroom: { id: string; code: string; name: string };
+  maintenance: Array<{
+    id: string;
+    date: string;
+    reason: string;
+    status: MaintenanceStatus;
+  }>;
+  cells: AvailabilityGridCell[];
 }
 
 export interface Annotation {
@@ -124,11 +191,25 @@ export interface StatsOverview {
     percentage: number;
   }[];
   pendingMaintenance: number;
+  reservationsByStatus: { status: ReservationStatus; count: number }[];
 }
 
 export interface AuthResponse {
   token: string;
   user: User;
+}
+
+export interface PaginationMeta {
+  page: number;
+  pageSize: number;
+  total: number;
+  totalPages: number;
+}
+
+export interface HealthStatus {
+  status: "ok";
+  db: "up" | "down";
+  uptime: number;
 }
 
 export interface ErrorResponse {

@@ -1,23 +1,48 @@
 import { Prisma } from "@prisma/client";
 import { prisma } from "../lib/prisma";
 import { ApiErrors } from "../utils/errors";
+import { buildMeta, buildPagination, PaginatedResult } from "../utils/pagination";
 import type { MaintenanceLog, MaintenanceStatus } from "../types";
 
 const CLASSROOM_SELECT = { select: { id: true, code: true, name: true } } as const;
 const MAINTENANCE_INCLUDE = { classroom: CLASSROOM_SELECT } as const;
 const TX_OPTIONS = { timeout: 30_000, maxWait: 10_000 } as const;
 
-export async function listMaintenance(classroomId?: string, status?: MaintenanceStatus): Promise<MaintenanceLog[]> {
-  const where: Record<string, unknown> = {};
-  if (classroomId) where.classroomId = classroomId;
-  if (status) where.status = status;
+export interface ListMaintenanceOptions {
+  classroomId?: string;
+  status?: MaintenanceStatus;
+  page: number;
+  pageSize: number;
+}
 
-  const logs = await prisma.maintenanceLog.findMany({
-    where,
+export async function listMaintenance(opts: ListMaintenanceOptions): Promise<PaginatedResult<MaintenanceLog>> {
+  const { skip, take } = buildPagination(opts.page, opts.pageSize);
+
+  const where: Record<string, unknown> = {};
+  if (opts.classroomId) where.classroomId = opts.classroomId;
+  if (opts.status) where.status = opts.status;
+
+  const [logs, total] = await Promise.all([
+    prisma.maintenanceLog.findMany({
+      where,
+      include: MAINTENANCE_INCLUDE,
+      orderBy: { date: "desc" },
+      skip,
+      take,
+    }),
+    prisma.maintenanceLog.count({ where }),
+  ]);
+
+  return { items: logs.map(toMaintenance), meta: buildMeta(total, opts.page, opts.pageSize) };
+}
+
+export async function getMaintenance(id: string): Promise<MaintenanceLog> {
+  const log = await prisma.maintenanceLog.findUnique({
+    where: { id },
     include: MAINTENANCE_INCLUDE,
-    orderBy: { date: "desc" },
   });
-  return logs.map(toMaintenance);
+  if (!log) throw ApiErrors.notFound("Mantenimiento no encontrado");
+  return toMaintenance(log);
 }
 
 export async function createMaintenance(classroomId: string, date: Date, reason: string, userId: string): Promise<MaintenanceLog> {

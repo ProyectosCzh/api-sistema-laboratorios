@@ -1,68 +1,97 @@
 import { Router } from "express";
 import { z } from "zod";
-import { validate } from "../middleware/validate";
 import { requireAuth, requireRole } from "../middleware/auth";
+import { validateBody, validateParams, validateQuery, getQuery, getParams } from "../middleware/validate";
+import { ok, paginated, noContent } from "../utils/responses";
 import * as classroomService from "../services/classroom.service";
+import * as availabilityService from "../services/availability.service";
+import type { ListClassroomsQuery, CreateClassroomInput, UpdateClassroomInput } from "../validators/classroom.schema";
+import type { ListClassroomsOptions } from "../services/classroom.service";
+import * as validators from "../validators/classroom.schema";
+
+const stateQuerySchema = z.object({
+  date: z.coerce.date().optional(),
+  timeSlotId: z.string().min(1).optional(),
+});
 
 const router = Router();
 
-const listClassroomsSchema = z.object({
-  includeInactive: z.enum(["true", "false"]).optional(),
-  status: z.enum(["ACTIVA", "INACTIVA", "EN_MANTENIMIENTO", "FUERA_SERVICIO"]).optional(),
-});
-
-router.get("/", requireAuth, validate(listClassroomsSchema, "query"), async (req, res, next) => {
+router.get("/", requireAuth, validateQuery(validators.listClassroomsQuerySchema), async (req, res, next) => {
   try {
-    const includeInactive = req.user!.role === "ENCARGADO" && req.query.includeInactive === "true";
-    const classrooms = await classroomService.listClassrooms(includeInactive, req.query.status as never);
-    res.status(200).json({ classrooms });
+    const query = getQuery<ListClassroomsQuery>(req);
+    const includeInactive = req.user!.role === "ENCARGADO" && query.includeInactive === "true";
+    const opts: ListClassroomsOptions = {
+      includeInactive,
+      status: query.status,
+      q: query.q,
+      page: query.page,
+      pageSize: query.pageSize,
+    };
+    const result = await classroomService.listClassrooms(opts);
+    paginated(res, result.items, result.meta);
   } catch (e) {
     next(e);
   }
 });
 
-const createClassroomSchema = z.object({
-  code: z.string().min(2).max(20).transform(s => s.trim().toUpperCase()),
-  name: z.string().min(2).max(100).trim(),
-  type: z.enum(["LAB_COMPUTACION", "LAB_GENERAL", "AULA"]),
-  capacity: z.coerce.number().int().min(1).max(500).optional(),
-  location: z.string().max(200).trim().nullish(),
-});
-
-router.post("/", requireAuth, requireRole("ENCARGADO"), validate(createClassroomSchema), async (req, res, next) => {
+router.get("/:id", requireAuth, validateParams(validators.idParamsSchema), async (req, res, next) => {
   try {
-    const classroom = await classroomService.createClassroom(req.body);
-    res.status(201).json({ classroom });
+    const { id } = getParams(req);
+    const classroom = await classroomService.getClassroom(id);
+    ok(res, { classroom }, 200);
   } catch (e) {
     next(e);
   }
 });
 
-const updateClassroomSchema = z.object({
-  code: z.string().min(2).max(20).transform(s => s.trim().toUpperCase()).optional(),
-  name: z.string().min(2).max(100).trim().optional(),
-  type: z.enum(["LAB_COMPUTACION", "LAB_GENERAL", "AULA"]).optional(),
-  status: z.enum(["ACTIVA", "INACTIVA", "EN_MANTENIMIENTO", "FUERA_SERVICIO"]).optional(),
-  capacity: z.coerce.number().int().min(1).max(500).optional(),
-  location: z.string().max(200).trim().nullish().optional(),
-}).refine(obj => Object.keys(obj).length > 0, { message: "Al menos un campo requerido" });
-
-router.patch("/:id", requireAuth, requireRole("ENCARGADO"), validate(updateClassroomSchema), validate(z.object({ id: z.string().min(1) }), "params"), async (req, res, next) => {
+/// Estado del aula según el documento base: LIBRE | OCUPADA | MANTENIMIENTO.
+router.get("/:id/state", requireAuth, validateParams(validators.idParamsSchema), validateQuery(stateQuerySchema), async (req, res, next) => {
   try {
-    const classroom = await classroomService.updateClassroom(req.params.id as string, req.body);
-    res.status(200).json({ classroom });
+    const { id } = getParams(req);
+    const query = getQuery<{ date?: Date; timeSlotId?: string }>(req);
+    const state = await availabilityService.getClassroomState(id, {
+      date: query.date,
+      timeSlotId: query.timeSlotId,
+    });
+    ok(res, state, 200);
   } catch (e) {
     next(e);
   }
 });
 
-router.delete("/:id", requireAuth, requireRole("ENCARGADO"), validate(z.object({ id: z.string().min(1) }), "params"), async (req, res, next) => {
+router.post("/", requireAuth, requireRole("ENCARGADO"), validateBody(validators.createClassroomSchema), async (req, res, next) => {
   try {
-    await classroomService.deleteClassroom(req.params.id as string);
-    res.status(200).json({ ok: true });
+    const body = getBody<CreateClassroomInput>(req);
+    const classroom = await classroomService.createClassroom(body);
+    ok(res, { classroom }, 201);
   } catch (e) {
     next(e);
   }
 });
+
+router.patch("/:id", requireAuth, requireRole("ENCARGADO"), validateParams(validators.idParamsSchema), validateBody(validators.updateClassroomSchema), async (req, res, next) => {
+  try {
+    const { id } = getParams(req);
+    const body = getBody<UpdateClassroomInput>(req);
+    const classroom = await classroomService.updateClassroom(id, body);
+    ok(res, { classroom }, 200);
+  } catch (e) {
+    next(e);
+  }
+});
+
+router.delete("/:id", requireAuth, requireRole("ENCARGADO"), validateParams(validators.idParamsSchema), async (req, res, next) => {
+  try {
+    const { id } = getParams(req);
+    await classroomService.deleteClassroom(id);
+    noContent(res);
+  } catch (e) {
+    next(e);
+  }
+});
+
+function getBody<T>(req: import("express").Request): T {
+  return req.validated?.body as T;
+}
 
 export default router;

@@ -1,14 +1,37 @@
 import bcrypt from "bcryptjs";
+import { Prisma } from "@prisma/client";
 import { prisma } from "../lib/prisma";
 import { ApiErrors } from "../utils/errors";
+import { buildMeta, buildPagination, PaginatedResult } from "../utils/pagination";
 import { toPublicUser } from "../utils/serializers";
 import type { User } from "../types";
+import type { ListUsersQuery } from "../validators/user.schema";
 
-export async function listUsers(): Promise<User[]> {
-  const users = await prisma.user.findMany({
-    orderBy: { createdAt: "desc" },
-  });
-  return users.map(toPublicUser);
+export async function listUsers(query: ListUsersQuery): Promise<PaginatedResult<User>> {
+  const { page, pageSize, q } = query;
+  const { skip, take } = buildPagination(page, pageSize);
+
+  const where: Prisma.UserWhereInput = q
+    ? {
+        OR: [
+          { name: { contains: q, mode: "insensitive" } },
+          { email: { contains: q, mode: "insensitive" } },
+        ],
+      }
+    : {};
+
+  const [users, total] = await Promise.all([
+    prisma.user.findMany({ where, orderBy: { createdAt: "desc" }, skip, take }),
+    prisma.user.count({ where }),
+  ]);
+
+  return { items: users.map(toPublicUser), meta: buildMeta(total, page, pageSize) };
+}
+
+export async function getUser(id: string): Promise<User> {
+  const user = await prisma.user.findUnique({ where: { id } });
+  if (!user) throw ApiErrors.notFound("Usuario no encontrado");
+  return toPublicUser(user);
 }
 
 export async function createUser(data: { name: string; email: string; password: string; role: "ENCARGADO" | "AYUDANTE" }): Promise<User> {

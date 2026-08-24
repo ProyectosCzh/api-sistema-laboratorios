@@ -1,20 +1,45 @@
+import { Prisma } from "@prisma/client";
 import { prisma } from "../lib/prisma";
 import { ApiErrors } from "../utils/errors";
+import { buildMeta, buildPagination, PaginatedResult } from "../utils/pagination";
 import type { Classroom, ClassroomStatus, ClassroomType } from "../types";
 
-export async function listClassrooms(includeInactive: boolean, status?: ClassroomStatus): Promise<Classroom[]> {
-  const where: { status?: ClassroomStatus | { not: ClassroomStatus } } = {};
-  if (status && !(status === "INACTIVA" && !includeInactive)) {
-    where.status = status;
-  } else if (!includeInactive) {
-    where.status = { not: "INACTIVA" };
+export interface ListClassroomsOptions {
+  includeInactive: boolean;
+  status?: ClassroomStatus;
+  q?: string;
+  page: number;
+  pageSize: number;
+}
+
+export async function listClassrooms(opts: ListClassroomsOptions): Promise<PaginatedResult<Classroom>> {
+  const { skip, take } = buildPagination(opts.page, opts.pageSize);
+
+  const where: Prisma.ClassroomWhereInput = {};
+  if (opts.includeInactive && opts.status) {
+    where.status = opts.status;
+  } else if (!opts.includeInactive) {
+    where.status = { notIn: ["INACTIVA", "FUERA_SERVICIO"] };
+  }
+  if (opts.q) {
+    where.OR = [
+      { code: { contains: opts.q, mode: "insensitive" } },
+      { name: { contains: opts.q, mode: "insensitive" } },
+    ];
   }
 
-  const classrooms = await prisma.classroom.findMany({
-    where,
-    orderBy: { code: "asc" },
-  });
-  return classrooms.map(toClassroom);
+  const [classrooms, total] = await Promise.all([
+    prisma.classroom.findMany({ where, orderBy: { code: "asc" }, skip, take }),
+    prisma.classroom.count({ where }),
+  ]);
+
+  return { items: classrooms.map(toClassroom), meta: buildMeta(total, opts.page, opts.pageSize) };
+}
+
+export async function getClassroom(id: string): Promise<Classroom> {
+  const classroom = await prisma.classroom.findUnique({ where: { id } });
+  if (!classroom) throw ApiErrors.notFound("Aula no encontrada");
+  return toClassroom(classroom);
 }
 
 export async function createClassroom(data: {
@@ -58,13 +83,6 @@ export async function updateClassroom(
 
   const classroom = await prisma.classroom.update({ where: { id }, data: updateData });
   return toClassroom(classroom);
-}
-
-export async function setClassroomStatus(id: string, status: ClassroomStatus): Promise<Classroom> {
-  const classroom = await prisma.classroom.findUnique({ where: { id }, select: { id: true } });
-  if (!classroom) throw ApiErrors.notFound("Aula no encontrada");
-  const updated = await prisma.classroom.update({ where: { id }, data: { status } });
-  return toClassroom(updated);
 }
 
 export async function deleteClassroom(id: string): Promise<void> {

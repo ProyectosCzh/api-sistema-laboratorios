@@ -1,65 +1,76 @@
 import { Router } from "express";
-import { z } from "zod";
-import { validate } from "../middleware/validate";
 import { requireAuth, requireRole } from "../middleware/auth";
+import { validateBody, validateParams, getParams, validateQuery, getQuery } from "../middleware/validate";
+import { ok, paginated, noContent } from "../utils/responses";
 import * as semesterService from "../services/semester.service";
+import type { ListSemestersQuery, CreateSemesterInput, UpdateSemesterInput } from "../validators/semester.schema";
+import * as validators from "../validators/semester.schema";
 
 const router = Router();
 
-router.get("/", requireAuth, async (_req, res, next) => {
+router.get("/", requireAuth, validateQuery(validators.listSemestersQuerySchema), async (req, res, next) => {
   try {
-    const semesters = await semesterService.listSemesters();
-    res.status(200).json({ semesters });
+    const query = getQuery<ListSemestersQuery>(req);
+    const result = await semesterService.listSemesters(query);
+    paginated(res, result.items, result.meta);
   } catch (e) {
     next(e);
   }
 });
 
-const createSemesterSchema = z.object({
-  name: z.string().min(2).max(20).trim(),
-  startDate: z.coerce.date(),
-  endDate: z.coerce.date(),
-}).superRefine((data, ctx) => {
-  if (data.endDate <= data.startDate) {
-    ctx.addIssue({ code: "custom", message: "endDate debe ser posterior a startDate", path: ["endDate"] });
-  }
-});
-
-router.post("/", requireAuth, requireRole("ENCARGADO"), validate(createSemesterSchema), async (req, res, next) => {
+router.get("/:id", requireAuth, validateParams(validators.idParamsSchema), async (req, res, next) => {
   try {
-    const semester = await semesterService.createSemester({ ...req.body, startDate: new Date(req.body.startDate), endDate: new Date(req.body.endDate) });
-    res.status(201).json({ semester });
+    const { id } = getParams(req);
+    const semester = await semesterService.getSemester(id);
+    ok(res, { semester }, 200);
   } catch (e) {
     next(e);
   }
 });
 
-const updateSemesterSchema = z.object({
-  name: z.string().min(2).max(20).trim().optional(),
-  startDate: z.coerce.date().optional(),
-  endDate: z.coerce.date().optional(),
-}).superRefine((data, ctx) => {
-  if (data.startDate && data.endDate && data.endDate <= data.startDate) {
-    ctx.addIssue({ code: "custom", message: "endDate debe ser posterior a startDate", path: ["endDate"] });
-  }
-});
-
-router.patch("/:id", requireAuth, requireRole("ENCARGADO"), validate(updateSemesterSchema), validate(z.object({ id: z.string().min(1) }), "params"), async (req, res, next) => {
+router.post("/", requireAuth, requireRole("ENCARGADO"), validateBody(validators.createSemesterSchema), async (req, res, next) => {
   try {
-    const semester = await semesterService.updateSemester(req.params.id as string, req.body);
-    res.status(200).json({ semester });
+    const body = getBody<CreateSemesterInput>(req);
+    const semester = await semesterService.createSemester(body);
+    ok(res, { semester }, 201);
   } catch (e) {
     next(e);
   }
 });
 
-router.post("/:id/activate", requireAuth, requireRole("ENCARGADO"), validate(z.object({ id: z.string().min(1) }), "params"), async (req, res, next) => {
+router.patch("/:id", requireAuth, requireRole("ENCARGADO"), validateParams(validators.idParamsSchema), validateBody(validators.updateSemesterSchema), async (req, res, next) => {
   try {
-    const semester = await semesterService.activateSemester(req.params.id as string);
-    res.status(200).json({ semester });
+    const { id } = getParams(req);
+    const body = getBody<UpdateSemesterInput>(req);
+    const semester = await semesterService.updateSemester(id, body);
+    ok(res, { semester }, 200);
   } catch (e) {
     next(e);
   }
 });
+
+router.delete("/:id", requireAuth, requireRole("ENCARGADO"), validateParams(validators.idParamsSchema), async (req, res, next) => {
+  try {
+    const { id } = getParams(req);
+    await semesterService.deleteSemester(id);
+    noContent(res);
+  } catch (e) {
+    next(e);
+  }
+});
+
+router.post("/:id/activate", requireAuth, requireRole("ENCARGADO"), validateParams(validators.idParamsSchema), async (req, res, next) => {
+  try {
+    const { id } = getParams(req);
+    const semester = await semesterService.activateSemester(id);
+    ok(res, { semester }, 200);
+  } catch (e) {
+    next(e);
+  }
+});
+
+function getBody<T>(req: import("express").Request): T {
+  return req.validated?.body as T;
+}
 
 export default router;

@@ -1,14 +1,38 @@
+import { Prisma } from "@prisma/client";
 import { prisma } from "../lib/prisma";
 import { isUniqueViolationOn } from "../utils/dbErrors";
 import { ApiErrors } from "../utils/errors";
+import { buildMeta, buildPagination, PaginatedResult } from "../utils/pagination";
 import type { Subject } from "../types";
 
-export async function listSubjects(includeInactive: boolean): Promise<Subject[]> {
-  const subjects = await prisma.subject.findMany({
-    where: includeInactive ? {} : { active: true },
-    orderBy: { code: "asc" },
-  });
-  return subjects.map(toSubject);
+export interface ListSubjectsOptions {
+  includeInactive: boolean;
+  q?: string;
+  page: number;
+  pageSize: number;
+}
+
+export async function listSubjects(opts: ListSubjectsOptions): Promise<PaginatedResult<Subject>> {
+  const { skip, take } = buildPagination(opts.page, opts.pageSize);
+
+  const where: Prisma.SubjectWhereInput = {
+    ...(opts.includeInactive ? {} : { active: true }),
+    ...(opts.q
+      ? {
+          OR: [
+            { code: { contains: opts.q, mode: "insensitive" } },
+            { name: { contains: opts.q, mode: "insensitive" } },
+          ],
+        }
+      : {}),
+  };
+
+  const [subjects, total] = await Promise.all([
+    prisma.subject.findMany({ where, orderBy: { code: "asc" }, skip, take }),
+    prisma.subject.count({ where }),
+  ]);
+
+  return { items: subjects.map(toSubject), meta: buildMeta(total, opts.page, opts.pageSize) };
 }
 
 export async function getSubject(id: string): Promise<Subject> {
@@ -29,13 +53,19 @@ export async function createSubject(data: { code: string; name: string }): Promi
   }
 }
 
-export async function updateSubject(id: string, data: { name?: string; active?: boolean }): Promise<Subject> {
-  const updateData: { name?: string; active?: boolean } = {};
+export async function updateSubject(id: string, data: { code?: string; name?: string; active?: boolean }): Promise<Subject> {
+  const updateData: { code?: string; name?: string; active?: boolean } = {};
+  if (data.code !== undefined) updateData.code = data.code.toUpperCase().trim();
   if (data.name !== undefined) updateData.name = data.name.trim();
   if (data.active !== undefined) updateData.active = data.active;
 
-  const subject = await prisma.subject.update({ where: { id }, data: updateData });
-  return toSubject(subject);
+  try {
+    const subject = await prisma.subject.update({ where: { id }, data: updateData });
+    return toSubject(subject);
+  } catch (e) {
+    if (isUniqueViolationOn(e, ["code"])) throw ApiErrors.subjectCodeInUse();
+    throw e;
+  }
 }
 
 export async function deleteSubject(id: string): Promise<void> {
