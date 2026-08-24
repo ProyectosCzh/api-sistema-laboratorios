@@ -1,9 +1,12 @@
 import bcrypt from "bcryptjs";
 import { Prisma } from "@prisma/client";
 import { prisma } from "../lib/prisma";
+import { cache } from "../cache";
+import { CACHE_KEYS, CACHE_POLICIES } from "../cache/policies";
 import { ApiErrors } from "../utils/errors";
 import { buildMeta, buildPagination, PaginatedResult } from "../utils/pagination";
 import { toPublicUser } from "../utils/serializers";
+import { revokeAllSessionsForUser } from "./auth.service";
 import type { User } from "../types";
 import type { ListUsersQuery } from "../validators/user.schema";
 
@@ -28,10 +31,26 @@ export async function listUsers(query: ListUsersQuery): Promise<PaginatedResult<
   return { items: users.map(toPublicUser), meta: buildMeta(total, page, pageSize) };
 }
 
+/**
+ * Lectura de usuario por id vía cache (user:{id}, 60s). Devuelve null si no
+ * existe (cache negativo) para no golpear la BD en cada request de auth.
+ * Toda escritura de usuario DEBE invalidar la clave.
+ */
+export async function findUserCached(id: string): Promise<User | null> {
+  return cache.getOrSet(
+    CACHE_KEYS.user(id),
+    async () => {
+      const user = await prisma.user.findUnique({ where: { id } });
+      return user ? toPublicUser(user) : null;
+    },
+    CACHE_POLICIES.userById
+  );
+}
+
 export async function getUser(id: string): Promise<User> {
-  const user = await prisma.user.findUnique({ where: { id } });
+  const user = await findUserCached(id);
   if (!user) throw ApiErrors.notFound("Usuario no encontrado");
-  return toPublicUser(user);
+  return user;
 }
 
 export async function createUser(data: { name: string; email: string; password: string; role: "ENCARGADO" | "AYUDANTE" }): Promise<User> {
@@ -43,7 +62,15 @@ export async function createUser(data: { name: string; email: string; password: 
   return toPublicUser(user);
 }
 
-export async function updateUser(id: string, data: { name?: string; email?: string; password?: string; role?: "ENCARGADO" | "AYUDANTE"; active?: boolean }): Promise<User> {
+/**
+ * Actualiza un usuario. Si cambia role/active revoca todas sus sesiones
+ * (excepto la del propio actor si se indica) y SIEMPRE invalida `user:{id}`.
+ */
+export async function updateUser(
+  id: string,
+  data: { name?: string; email?: string; password?: string; role?: "ENCARGADO" | "AYUDANTE"; active?: boolean },
+  opts?: { keepSessionId?: string }
+): Promise<User> {
   const updateData: typeof data & { passwordHash?: string } = { ...data };
   if (data.password) {
     updateData.passwordHash = await bcrypt.hash(data.password, 12);
@@ -53,6 +80,10 @@ export async function updateUser(id: string, data: { name?: string; email?: stri
     updateData.email = data.email.toLowerCase();
   }
   const user = await prisma.user.update({ where: { id }, data: updateData });
+  cache.del(CACHE_KEYS.user(id));
+  if (data.role !== undefined || data.active !== undefined) {
+    await revokeAllSessionsForUser(id, opts?.keepSessionId);
+  }
   return toPublicUser(user);
 }
 
@@ -70,4 +101,5 @@ export async function deleteUser(id: string, currentUserId: string): Promise<voi
   }
 
   await prisma.user.delete({ where: { id } });
+  cache.del(CACHE_KEYS.user(id));
 }

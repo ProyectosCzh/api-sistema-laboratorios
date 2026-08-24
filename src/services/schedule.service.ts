@@ -1,5 +1,6 @@
 import { Prisma } from "@prisma/client";
 import { prisma } from "../lib/prisma";
+import { invalidateOccupancy } from "../cache/invalidate";
 import { uniqueViolationColumns } from "../utils/dbErrors";
 import { ApiErrors } from "../utils/errors";
 import type { Schedule } from "../types";
@@ -109,6 +110,7 @@ export async function createSchedule(data: CreateScheduleData, userId: string): 
     }
   }, TX_OPTIONS);
 
+  invalidateOccupancy(data.semesterId);
   return toSchedule(created);
 }
 
@@ -187,6 +189,7 @@ export async function updateSchedule(
     }
   }, TX_OPTIONS);
 
+  invalidateOccupancy(semesterId);
   return toSchedule(updated);
 }
 
@@ -197,6 +200,7 @@ export async function deleteSchedule(id: string, userId: string, userRole: Role)
   if (userRole === "AYUDANTE" && existing.assignedById !== userId) throw ApiErrors.forbidden();
 
   await prisma.schedule.delete({ where: { id } });
+  invalidateOccupancy(existing.semesterId);
 }
 
 type ScheduleWithRelations = Prisma.ScheduleGetPayload<{ include: typeof SCHEDULE_INCLUDE }>;

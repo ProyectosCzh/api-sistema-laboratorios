@@ -1,4 +1,11 @@
 import { prisma } from "../lib/prisma";
+import { cache } from "../cache";
+import { CACHE_KEYS, CACHE_POLICIES } from "../cache/policies";
+import {
+  invalidateAllGrids,
+  invalidateCatalog,
+  invalidateSemesterActivation,
+} from "../cache/invalidate";
 import type { ListSemestersQuery } from "../validators/semester.schema";
 import { ApiErrors } from "../utils/errors";
 import { buildMeta, buildPagination, PaginatedResult } from "../utils/pagination";
@@ -6,14 +13,20 @@ import type { Semester } from "../types";
 
 export async function listSemesters(query: ListSemestersQuery): Promise<PaginatedResult<Semester>> {
   const { page, pageSize } = query;
-  const { skip, take } = buildPagination(page, pageSize);
+  return cache.getOrSet(
+    CACHE_KEYS.semestersList(page, pageSize),
+    async () => {
+      const { skip, take } = buildPagination(page, pageSize);
 
-  const [semesters, total] = await Promise.all([
-    prisma.semester.findMany({ orderBy: { startDate: "desc" }, skip, take }),
-    prisma.semester.count(),
-  ]);
+      const [semesters, total] = await Promise.all([
+        prisma.semester.findMany({ orderBy: { startDate: "desc" }, skip, take }),
+        prisma.semester.count(),
+      ]);
 
-  return { items: semesters.map(toSemester), meta: buildMeta(total, page, pageSize) };
+      return { items: semesters.map(toSemester), meta: buildMeta(total, page, pageSize) };
+    },
+    CACHE_POLICIES.semesters
+  );
 }
 
 export async function getSemester(id: string): Promise<Semester> {
@@ -44,6 +57,7 @@ export async function createSemester(data: {
       isActive: false,
     },
   });
+  invalidateCatalog();
   return toSemester(semester);
 }
 
@@ -57,6 +71,8 @@ export async function updateSemester(
   const updateData = { ...data };
   if (data.workingDays !== undefined) updateData.workingDays = normalizeWorkingDays(data.workingDays);
   const semester = await prisma.semester.update({ where: { id }, data: updateData });
+  invalidateCatalog();
+  invalidateAllGrids();
   return toSemester(semester);
 }
 
@@ -65,6 +81,7 @@ export async function activateSemester(id: string): Promise<Semester> {
     prisma.semester.updateMany({ where: { isActive: true }, data: { isActive: false } }),
     prisma.semester.update({ where: { id }, data: { isActive: true } }),
   ]);
+  invalidateSemesterActivation();
   const semester = await prisma.semester.findUniqueOrThrow({ where: { id } });
   return toSemester(semester);
 }
@@ -81,6 +98,7 @@ export async function deleteSemester(id: string): Promise<void> {
   if (reservationsCount > 0 || schedulesCount > 0) throw ApiErrors.semesterHasDependencies();
 
   await prisma.semester.delete({ where: { id } });
+  invalidateCatalog();
 }
 
 function toSemester(s: {

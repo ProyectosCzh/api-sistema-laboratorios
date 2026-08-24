@@ -1,5 +1,8 @@
 import { Prisma } from "@prisma/client";
 import { prisma } from "../lib/prisma";
+import { cache } from "../cache";
+import { CACHE_KEYS, CACHE_POLICIES } from "../cache/policies";
+import { invalidateCatalog } from "../cache/invalidate";
 import { isUniqueViolationOn } from "../utils/dbErrors";
 import { ApiErrors } from "../utils/errors";
 import { buildMeta, buildPagination, PaginatedResult } from "../utils/pagination";
@@ -13,27 +16,33 @@ export interface ListTeachersOptions {
 }
 
 export async function listTeachers(opts: ListTeachersOptions): Promise<PaginatedResult<Teacher>> {
-  const { skip, take } = buildPagination(opts.page, opts.pageSize);
+  return cache.getOrSet(
+    CACHE_KEYS.teachersList(opts),
+    async () => {
+      const { skip, take } = buildPagination(opts.page, opts.pageSize);
 
-  const where: Prisma.TeacherWhereInput = {
-    ...(opts.includeInactive ? {} : { active: true }),
-    ...(opts.q
-      ? {
-          OR: [
-            { code: { contains: opts.q, mode: "insensitive" } },
-            { name: { contains: opts.q, mode: "insensitive" } },
-            { email: { contains: opts.q, mode: "insensitive" } },
-          ],
-        }
-      : {}),
-  };
+      const where: Prisma.TeacherWhereInput = {
+        ...(opts.includeInactive ? {} : { active: true }),
+        ...(opts.q
+          ? {
+              OR: [
+                { code: { contains: opts.q, mode: "insensitive" } },
+                { name: { contains: opts.q, mode: "insensitive" } },
+                { email: { contains: opts.q, mode: "insensitive" } },
+              ],
+            }
+          : {}),
+      };
 
-  const [teachers, total] = await Promise.all([
-    prisma.teacher.findMany({ where, orderBy: { name: "asc" }, skip, take }),
-    prisma.teacher.count({ where }),
-  ]);
+      const [teachers, total] = await Promise.all([
+        prisma.teacher.findMany({ where, orderBy: { name: "asc" }, skip, take }),
+        prisma.teacher.count({ where }),
+      ]);
 
-  return { items: teachers.map(toTeacher), meta: buildMeta(total, opts.page, opts.pageSize) };
+      return { items: teachers.map(toTeacher), meta: buildMeta(total, opts.page, opts.pageSize) };
+    },
+    CACHE_POLICIES.teachers
+  );
 }
 
 export async function getTeacher(id: string): Promise<Teacher> {
@@ -51,6 +60,7 @@ export async function createTeacher(data: { code: string; name: string; email?: 
         email: normalizeEmail(data.email),
       },
     });
+    invalidateCatalog();
     return toTeacher(teacher);
   } catch (e) {
     if (isUniqueViolationOn(e, ["code"])) throw ApiErrors.teacherCodeInUse();
@@ -71,6 +81,7 @@ export async function updateTeacher(
 
   try {
     const teacher = await prisma.teacher.update({ where: { id }, data: updateData });
+    invalidateCatalog();
     return toTeacher(teacher);
   } catch (e) {
     if (isUniqueViolationOn(e, ["code"])) throw ApiErrors.teacherCodeInUse();
@@ -81,6 +92,7 @@ export async function updateTeacher(
 
 export async function deleteTeacher(id: string): Promise<void> {
   await prisma.teacher.update({ where: { id }, data: { active: false } });
+  invalidateCatalog();
 }
 
 function normalizeEmail(email?: string | null): string | null {

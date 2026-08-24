@@ -1,9 +1,15 @@
 import { prisma } from "../lib/prisma";
+import { cache } from "../cache";
+import { CACHE_KEYS, CACHE_POLICIES } from "../cache/policies";
 import type { StatsOverview } from "../types";
 
 const FALLBACK_DAYS_PER_WEEK = 6;
 
 export async function getOverview(): Promise<StatsOverview> {
+  return cache.getOrSet(CACHE_KEYS.statsOverview, loadOverview, CACHE_POLICIES.statsOverview);
+}
+
+async function loadOverview(): Promise<StatsOverview> {
   const [activeSemester, totalClassrooms, classroomsByType, timeSlotCount, pendingMaintenance, reservationsByStatus] =
     await Promise.all([
       prisma.semester.findFirst({ where: { isActive: true }, select: { id: true, name: true, workingDays: true } }),
@@ -47,14 +53,12 @@ async function getOccupancyData(activeSemesterId: string | undefined, totalSlots
     return classrooms.map(c => ({ classroom: c, occupiedSlots: 0, totalSlots, percentage: 0 }));
   }
 
-  const schedules = await prisma.schedule.findMany({
+  const grouped = await prisma.schedule.groupBy({
+    by: ["classroomId"],
     where: { semesterId: activeSemesterId },
-    select: { classroomId: true },
+    _count: { _all: true },
   });
-  const occupiedByClassroom = new Map<string, number>();
-  for (const s of schedules) {
-    occupiedByClassroom.set(s.classroomId, (occupiedByClassroom.get(s.classroomId) || 0) + 1);
-  }
+  const occupiedByClassroom = new Map(grouped.map(g => [g.classroomId, g._count._all]));
 
   return classrooms.map(c => {
     const occupied = occupiedByClassroom.get(c.id) || 0;

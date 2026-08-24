@@ -1,5 +1,6 @@
 import { Prisma } from "@prisma/client";
 import { prisma } from "../lib/prisma";
+import { invalidateMaintenanceImpact } from "../cache/invalidate";
 import { ApiErrors } from "../utils/errors";
 import { buildMeta, buildPagination, PaginatedResult } from "../utils/pagination";
 import type { MaintenanceLog, MaintenanceStatus } from "../types";
@@ -60,6 +61,7 @@ export async function createMaintenance(classroomId: string, date: Date, reason:
     return created;
   }, TX_OPTIONS);
 
+  invalidateMaintenanceImpact();
   return toMaintenance(log);
 }
 
@@ -77,6 +79,7 @@ export async function updateMaintenance(id: string, status: MaintenanceStatus): 
     return updated;
   }, TX_OPTIONS);
 
+  invalidateMaintenanceImpact();
   return toMaintenance(log);
 }
 
@@ -88,6 +91,7 @@ export async function deleteMaintenance(id: string): Promise<void> {
     await tx.maintenanceLog.delete({ where: { id } });
     await syncClassroomAvailability(tx, existing.classroomId);
   }, TX_OPTIONS);
+  invalidateMaintenanceImpact();
 }
 
 async function syncClassroomAvailability(tx: Prisma.TransactionClient, classroomId: string): Promise<void> {

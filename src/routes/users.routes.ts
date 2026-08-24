@@ -42,7 +42,7 @@ router.patch("/:id", requireAuth, requireRole("ENCARGADO"), validateParams(valid
   try {
     const { id } = getParams(req);
     const body = getBody<UpdateUserInput>(req);
-    const user = await userService.updateUser(id, body);
+    const user = await userService.updateUser(id, body, { keepSessionId: req.user!.sid });
     ok(res, { user }, 200);
   } catch (e) {
     next(e);

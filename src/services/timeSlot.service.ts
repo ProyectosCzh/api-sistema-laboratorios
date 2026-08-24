@@ -1,12 +1,21 @@
 import { prisma } from "../lib/prisma";
+import { cache } from "../cache";
+import { CACHE_KEYS, CACHE_POLICIES } from "../cache/policies";
+import { invalidateCatalog, invalidateStats } from "../cache/invalidate";
 import { isUniqueViolationOn } from "../utils/dbErrors";
 import { ApiErrors } from "../utils/errors";
 import type { TimeSlot } from "../types";
 import type { CreateTimeSlotInput, UpdateTimeSlotInput } from "../validators/timeSlot.schema";
 
 export async function listTimeSlots(): Promise<TimeSlot[]> {
-  const slots = await prisma.timeSlot.findMany({ orderBy: { order: "asc" } });
-  return slots.map(toTimeSlot);
+  return cache.getOrSet(
+    CACHE_KEYS.timeSlotsList,
+    async () => {
+      const slots = await prisma.timeSlot.findMany({ orderBy: { order: "asc" } });
+      return slots.map(toTimeSlot);
+    },
+    CACHE_POLICIES.timeSlots
+  );
 }
 
 export async function getTimeSlot(id: string): Promise<TimeSlot> {
@@ -18,6 +27,8 @@ export async function getTimeSlot(id: string): Promise<TimeSlot> {
 export async function createTimeSlot(data: CreateTimeSlotInput): Promise<TimeSlot> {
   try {
     const slot = await prisma.timeSlot.create({ data });
+    invalidateCatalog();
+    invalidateStats();
     return toTimeSlot(slot);
   } catch (e) {
     if (isUniqueViolationOn(e, ["order"])) throw ApiErrors.timeSlotOrderInUse();
@@ -37,6 +48,8 @@ export async function updateTimeSlot(id: string, data: UpdateTimeSlotInput): Pro
 
   try {
     const slot = await prisma.timeSlot.update({ where: { id }, data: updateData });
+    invalidateCatalog();
+    invalidateStats();
     return toTimeSlot(slot);
   } catch (e) {
     if (isUniqueViolationOn(e, ["order"])) throw ApiErrors.timeSlotOrderInUse();
@@ -52,6 +65,8 @@ export async function deleteTimeSlot(id: string): Promise<void> {
   if (schedulesCount > 0) throw ApiErrors.timeSlotInUse();
 
   await prisma.timeSlot.delete({ where: { id } });
+  invalidateCatalog();
+  invalidateStats();
 }
 
 function toTimeSlot(t: { id: string; label: string; startTime: string; endTime: string; order: number }): TimeSlot {

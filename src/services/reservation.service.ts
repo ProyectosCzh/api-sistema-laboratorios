@@ -1,6 +1,8 @@
 import { Prisma } from "@prisma/client";
 import { prisma } from "../lib/prisma";
+import { invalidateOccupancy } from "../cache/invalidate";
 import { ApiErrors } from "../utils/errors";
+import { mapReservationUniqueViolation } from "../utils/dbErrors";
 import { buildMeta, buildPagination, PaginatedResult } from "../utils/pagination";
 import type { Reservation, ReservationStatus, UserRole } from "../types";
 import {
@@ -99,36 +101,43 @@ export async function createReservation(data: CreateReservationData, userId: str
     assertSemesterWorkingDay(semester, dayOfWeek);
   }
 
-  const created = await prisma.$transaction(async tx => {
-    await assertClassroomBookable(tx, data.classroomId);
-    const slot = {
-      classroomId: data.classroomId,
-      semesterId: data.semesterId,
-      timeSlotId: data.timeSlotId,
-    };
-
-    if (data.type === "RECURRENTE") {
-      await assertRecurringSlotAvailable(tx, { ...slot, dayOfWeek: dayOfWeek! });
-    } else {
-      await assertPunctualSlotAvailable(tx, { ...slot, date: date! });
-    }
-
-    return tx.reservation.create({
-      data: {
+  let created;
+  try {
+    created = await prisma.$transaction(async tx => {
+      await assertClassroomBookable(tx, data.classroomId);
+      const slot = {
         classroomId: data.classroomId,
         semesterId: data.semesterId,
-        type: data.type,
-        dayOfWeek: data.type === "RECURRENTE" ? dayOfWeek : null,
-        date,
         timeSlotId: data.timeSlotId,
-        status: "PENDIENTE",
-        note: data.note?.trim() || null,
-        requestedById: userId,
-      },
-      include: RESERVATION_INCLUDE,
-    });
-  }, TX_OPTIONS);
+      };
 
+      if (data.type === "RECURRENTE") {
+        await assertRecurringSlotAvailable(tx, { ...slot, dayOfWeek: dayOfWeek! });
+      } else {
+        await assertPunctualSlotAvailable(tx, { ...slot, date: date! });
+      }
+
+      return tx.reservation.create({
+        data: {
+          classroomId: data.classroomId,
+          semesterId: data.semesterId,
+          type: data.type,
+          dayOfWeek: data.type === "RECURRENTE" ? dayOfWeek : null,
+          date,
+          timeSlotId: data.timeSlotId,
+          status: "PENDIENTE",
+          note: data.note?.trim() || null,
+          requestedById: userId,
+        },
+        include: RESERVATION_INCLUDE,
+      });
+    }, TX_OPTIONS);
+  } catch (e) {
+    mapReservationUniqueViolation(e);
+    throw e;
+  }
+
+  invalidateOccupancy(data.semesterId);
   return toReservation(created);
 }
 
@@ -172,39 +181,46 @@ export async function updateReservation(
     if (existing.type === "PUNTUAL" && date) assertDateWithinSemester(semester, date);
   }
 
-  const updated = await prisma.$transaction(async tx => {
-    if (slotChanged) {
-      await assertClassroomBookable(tx, classroomId);
-      const slot = { classroomId, semesterId: existing.semesterId, timeSlotId };
+  let updated;
+  try {
+    updated = await prisma.$transaction(async tx => {
+      if (slotChanged) {
+        await assertClassroomBookable(tx, classroomId);
+        const slot = { classroomId, semesterId: existing.semesterId, timeSlotId };
 
-      if (existing.type === "RECURRENTE") {
-        await assertRecurringSlotAvailable(
-          tx,
-          { ...slot, dayOfWeek: dayOfWeek! },
-          { excludeReservationId: id }
-        );
-      } else {
-        await assertPunctualSlotAvailable(
-          tx,
-          { ...slot, date: date! },
-          { excludeReservationId: id }
-        );
+        if (existing.type === "RECURRENTE") {
+          await assertRecurringSlotAvailable(
+            tx,
+            { ...slot, dayOfWeek: dayOfWeek! },
+            { excludeReservationId: id }
+          );
+        } else {
+          await assertPunctualSlotAvailable(
+            tx,
+            { ...slot, date: date! },
+            { excludeReservationId: id }
+          );
+        }
       }
-    }
 
-    return tx.reservation.update({
-      where: { id },
-      data: {
-        ...(data.note !== undefined ? { note: data.note?.trim() || null } : {}),
-        classroomId,
-        timeSlotId,
-        dayOfWeek,
-        date,
-      },
-      include: RESERVATION_INCLUDE,
-    });
-  }, TX_OPTIONS);
+      return tx.reservation.update({
+        where: { id },
+        data: {
+          ...(data.note !== undefined ? { note: data.note?.trim() || null } : {}),
+          classroomId,
+          timeSlotId,
+          dayOfWeek,
+          date,
+        },
+        include: RESERVATION_INCLUDE,
+      });
+    }, TX_OPTIONS);
+  } catch (e) {
+    mapReservationUniqueViolation(e);
+    throw e;
+  }
 
+  invalidateOccupancy(existing.semesterId);
   return toReservation(updated);
 }
 
@@ -235,41 +251,48 @@ export async function updateReservationStatus(
     if (!isOwnerCancel) throw ApiErrors.forbidden();
   }
 
-  const updated = await prisma.$transaction(async tx => {
-    // Al confirmar se revalida la disponibilidad: pudo surgir un conflicto
-    // entre la creación de la reserva y su confirmación.
-    if (targetStatus === "CONFIRMADA") {
-      await assertClassroomBookable(tx, existing.classroomId);
-      const slot = {
-        classroomId: existing.classroomId,
-        semesterId: existing.semesterId,
-        timeSlotId: existing.timeSlotId,
-      };
-      if (existing.type === "RECURRENTE") {
-        await assertRecurringSlotAvailable(
-          tx,
-          { ...slot, dayOfWeek: existing.dayOfWeek! },
-          { excludeReservationId: id }
-        );
-      } else {
-        await assertPunctualSlotAvailable(
-          tx,
-          { ...slot, date: existing.date! },
-          { excludeReservationId: id }
-        );
+  let updated;
+  try {
+    updated = await prisma.$transaction(async tx => {
+      // Al confirmar se revalida la disponibilidad: pudo surgir un conflicto
+      // entre la creación de la reserva y su confirmación.
+      if (targetStatus === "CONFIRMADA") {
+        await assertClassroomBookable(tx, existing.classroomId);
+        const slot = {
+          classroomId: existing.classroomId,
+          semesterId: existing.semesterId,
+          timeSlotId: existing.timeSlotId,
+        };
+        if (existing.type === "RECURRENTE") {
+          await assertRecurringSlotAvailable(
+            tx,
+            { ...slot, dayOfWeek: existing.dayOfWeek! },
+            { excludeReservationId: id }
+          );
+        } else {
+          await assertPunctualSlotAvailable(
+            tx,
+            { ...slot, date: existing.date! },
+            { excludeReservationId: id }
+          );
+        }
       }
-    }
 
-    return tx.reservation.update({
-      where: { id },
-      data: {
-        status: targetStatus,
-        resolvedById: user.id,
-      },
-      include: RESERVATION_INCLUDE,
-    });
-  }, TX_OPTIONS);
+      return tx.reservation.update({
+        where: { id },
+        data: {
+          status: targetStatus,
+          resolvedById: user.id,
+        },
+        include: RESERVATION_INCLUDE,
+      });
+    }, TX_OPTIONS);
+  } catch (e) {
+    mapReservationUniqueViolation(e);
+    throw e;
+  }
 
+  invalidateOccupancy(existing.semesterId);
   return toReservation(updated);
 }
 

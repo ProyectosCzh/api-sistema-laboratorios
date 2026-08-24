@@ -1,5 +1,8 @@
 import { Prisma } from "@prisma/client";
 import { prisma } from "../lib/prisma";
+import { cache } from "../cache";
+import { CACHE_KEYS, CACHE_POLICIES } from "../cache/policies";
+import { invalidateCatalog, invalidateStats } from "../cache/invalidate";
 import { ApiErrors } from "../utils/errors";
 import { buildMeta, buildPagination, PaginatedResult } from "../utils/pagination";
 import type { Classroom, ClassroomStatus, ClassroomType } from "../types";
@@ -13,27 +16,33 @@ export interface ListClassroomsOptions {
 }
 
 export async function listClassrooms(opts: ListClassroomsOptions): Promise<PaginatedResult<Classroom>> {
-  const { skip, take } = buildPagination(opts.page, opts.pageSize);
+  return cache.getOrSet(
+    CACHE_KEYS.classroomsList(opts),
+    async () => {
+      const { skip, take } = buildPagination(opts.page, opts.pageSize);
 
-  const where: Prisma.ClassroomWhereInput = {};
-  if (opts.includeInactive && opts.status) {
-    where.status = opts.status;
-  } else if (!opts.includeInactive) {
-    where.status = { notIn: ["INACTIVA", "FUERA_SERVICIO"] };
-  }
-  if (opts.q) {
-    where.OR = [
-      { code: { contains: opts.q, mode: "insensitive" } },
-      { name: { contains: opts.q, mode: "insensitive" } },
-    ];
-  }
+      const where: Prisma.ClassroomWhereInput = {};
+      if (opts.includeInactive && opts.status) {
+        where.status = opts.status;
+      } else if (!opts.includeInactive) {
+        where.status = { notIn: ["INACTIVA", "FUERA_SERVICIO"] };
+      }
+      if (opts.q) {
+        where.OR = [
+          { code: { contains: opts.q, mode: "insensitive" } },
+          { name: { contains: opts.q, mode: "insensitive" } },
+        ];
+      }
 
-  const [classrooms, total] = await Promise.all([
-    prisma.classroom.findMany({ where, orderBy: { code: "asc" }, skip, take }),
-    prisma.classroom.count({ where }),
-  ]);
+      const [classrooms, total] = await Promise.all([
+        prisma.classroom.findMany({ where, orderBy: { code: "asc" }, skip, take }),
+        prisma.classroom.count({ where }),
+      ]);
 
-  return { items: classrooms.map(toClassroom), meta: buildMeta(total, opts.page, opts.pageSize) };
+      return { items: classrooms.map(toClassroom), meta: buildMeta(total, opts.page, opts.pageSize) };
+    },
+    CACHE_POLICIES.classrooms
+  );
 }
 
 export async function getClassroom(id: string): Promise<Classroom> {
@@ -59,6 +68,8 @@ export async function createClassroom(data: {
       status: "ACTIVA",
     },
   });
+  invalidateCatalog();
+  invalidateStats();
   return toClassroom(classroom);
 }
 
@@ -82,11 +93,15 @@ export async function updateClassroom(
   if (data.location !== undefined) updateData.location = data.location?.trim() || null;
 
   const classroom = await prisma.classroom.update({ where: { id }, data: updateData });
+  invalidateCatalog();
+  invalidateStats();
   return toClassroom(classroom);
 }
 
 export async function deleteClassroom(id: string): Promise<void> {
   await prisma.classroom.update({ where: { id }, data: { status: "INACTIVA" } });
+  invalidateCatalog();
+  invalidateStats();
 }
 
 type ClassroomRecord = {
