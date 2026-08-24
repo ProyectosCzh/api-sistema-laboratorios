@@ -11,6 +11,7 @@ export const createSubjectSchema = z.object({
 });
 
 export const updateSubjectSchema = z.object({
+  code: z.string().min(2).max(20).transform(s => s.trim().toUpperCase()).optional(),
   name: z.string().min(2).max(120).trim().optional(),
   active: z.boolean().optional(),
 }).refine(obj => Object.keys(obj).length > 0, { message: "Al menos un campo requerido" });

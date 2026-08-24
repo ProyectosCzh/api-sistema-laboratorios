@@ -12,6 +12,7 @@ export const createTeacherSchema = z.object({
 });
 
 export const updateTeacherSchema = z.object({
+  code: z.string().min(2).max(30).transform(s => s.trim().toUpperCase()).optional(),
   name: z.string().min(2).max(120).trim().optional(),
   email: z.email().nullish().optional(),
   active: z.boolean().optional(),

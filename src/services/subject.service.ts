@@ -53,13 +53,19 @@ export async function createSubject(data: { code: string; name: string }): Promi
   }
 }
 
-export async function updateSubject(id: string, data: { name?: string; active?: boolean }): Promise<Subject> {
-  const updateData: { name?: string; active?: boolean } = {};
+export async function updateSubject(id: string, data: { code?: string; name?: string; active?: boolean }): Promise<Subject> {
+  const updateData: { code?: string; name?: string; active?: boolean } = {};
+  if (data.code !== undefined) updateData.code = data.code.toUpperCase().trim();
   if (data.name !== undefined) updateData.name = data.name.trim();
   if (data.active !== undefined) updateData.active = data.active;
 
-  const subject = await prisma.subject.update({ where: { id }, data: updateData });
-  return toSubject(subject);
+  try {
+    const subject = await prisma.subject.update({ where: { id }, data: updateData });
+    return toSubject(subject);
+  } catch (e) {
+    if (isUniqueViolationOn(e, ["code"])) throw ApiErrors.subjectCodeInUse();
+    throw e;
+  }
 }
 
 export async function deleteSubject(id: string): Promise<void> {

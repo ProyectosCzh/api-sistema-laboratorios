@@ -1,12 +1,12 @@
 import { prisma } from "../lib/prisma";
 import type { StatsOverview } from "../types";
 
-const DAYS_PER_WEEK = 6;
+const FALLBACK_DAYS_PER_WEEK = 6;
 
 export async function getOverview(): Promise<StatsOverview> {
   const [activeSemester, totalClassrooms, classroomsByType, timeSlotCount, pendingMaintenance, reservationsByStatus] =
     await Promise.all([
-      prisma.semester.findFirst({ where: { isActive: true }, select: { id: true, name: true } }),
+      prisma.semester.findFirst({ where: { isActive: true }, select: { id: true, name: true, workingDays: true } }),
       prisma.classroom.count({ where: { status: { not: "INACTIVA" } } }),
       prisma.classroom.groupBy({
         by: ["type"],
@@ -21,7 +21,8 @@ export async function getOverview(): Promise<StatsOverview> {
       }),
     ]);
 
-  const totalSlots = timeSlotCount * DAYS_PER_WEEK;
+  const workingDays = activeSemester?.workingDays ?? [];
+  const totalSlots = timeSlotCount * (workingDays.length > 0 ? workingDays.length : FALLBACK_DAYS_PER_WEEK);
 
   return {
     totalClassrooms,

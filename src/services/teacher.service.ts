@@ -61,9 +61,10 @@ export async function createTeacher(data: { code: string; name: string; email?: 
 
 export async function updateTeacher(
   id: string,
-  data: { name?: string; email?: string | null; active?: boolean }
+  data: { code?: string; name?: string; email?: string | null; active?: boolean }
 ): Promise<Teacher> {
-  const updateData: { name?: string; email?: string | null; active?: boolean } = {};
+  const updateData: { code?: string; name?: string; email?: string | null; active?: boolean } = {};
+  if (data.code !== undefined) updateData.code = data.code.toUpperCase().trim();
   if (data.name !== undefined) updateData.name = data.name.trim();
   if (data.email !== undefined) updateData.email = normalizeEmail(data.email);
   if (data.active !== undefined) updateData.active = data.active;
@@ -72,6 +73,7 @@ export async function updateTeacher(
     const teacher = await prisma.teacher.update({ where: { id }, data: updateData });
     return toTeacher(teacher);
   } catch (e) {
+    if (isUniqueViolationOn(e, ["code"])) throw ApiErrors.teacherCodeInUse();
     if (isUniqueViolationOn(e, ["email"])) throw ApiErrors.teacherEmailInUse();
     throw e;
   }

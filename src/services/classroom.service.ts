@@ -16,10 +16,10 @@ export async function listClassrooms(opts: ListClassroomsOptions): Promise<Pagin
   const { skip, take } = buildPagination(opts.page, opts.pageSize);
 
   const where: Prisma.ClassroomWhereInput = {};
-  if (opts.status && !(opts.status === "INACTIVA" && !opts.includeInactive)) {
+  if (opts.includeInactive && opts.status) {
     where.status = opts.status;
   } else if (!opts.includeInactive) {
-    where.status = { not: "INACTIVA" };
+    where.status = { notIn: ["INACTIVA", "FUERA_SERVICIO"] };
   }
   if (opts.q) {
     where.OR = [
