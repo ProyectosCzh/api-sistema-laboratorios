@@ -56,6 +56,26 @@ model User {
   maintenance  MaintenanceLog[]
   requestedReservations Reservation[] @relation("ReservationRequester")
   resolvedReservations  Reservation[] @relation("ReservationResolver")
+  sessions              Session[]
+}
+
+/// Sesion activa por dispositivo: cada login emite una Session con su propio
+/// refresh token hasheado. La rotacion encadena sesiones via rotatedToId y la
+/// deteccion de reuso revoca toda la familia del usuario.
+model Session {
+  id               String    @id @default(cuid())
+  userId           String
+  user             User      @relation(fields: [userId], references: [id], onDelete: Cascade)
+  refreshTokenHash String    @unique
+  userAgent        String?
+  ip               String?
+  expiresAt        DateTime
+  revokedAt        DateTime?
+  rotatedToId      String?   @unique
+  createdAt        DateTime  @default(now())
+
+  @@index([userId])
+  @@index([expiresAt])
 }
 
 model Classroom {
