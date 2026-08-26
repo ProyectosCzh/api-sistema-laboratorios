@@ -2,7 +2,7 @@ import { Router } from "express";
 import { z } from "zod";
 import { requireAuth, requireRole } from "../middleware/auth";
 import { validateBody, validateParams, validateQuery, getQuery, getParams } from "../middleware/validate";
-import { ok, paginated, noContent } from "../utils/responses";
+import { ok, noContent, paginatedCached } from "../utils/responses";
 import * as classroomService from "../services/classroom.service";
 import * as availabilityService from "../services/availability.service";
 import type { ListClassroomsQuery, CreateClassroomInput, UpdateClassroomInput } from "../validators/classroom.schema";
@@ -28,7 +28,8 @@ router.get("/", requireAuth, validateQuery(validators.listClassroomsQuerySchema)
       pageSize: query.pageSize,
     };
     const result = await classroomService.listClassrooms(opts);
-    paginated(res, result.items, result.meta);
+    // Service cachea 5min (CACHE_POLICIES.classrooms): private max-age acorde.
+    paginatedCached(res, result.items, result.meta, 5 * 60);
   } catch (e) {
     next(e);
   }

@@ -1,7 +1,7 @@
 import { Router } from "express";
 import { requireAuth } from "../middleware/auth";
 import { validateQuery, getQuery } from "../middleware/validate";
-import { ok } from "../utils/responses";
+import { okCached } from "../utils/responses";
 import * as availabilityService from "../services/availability.service";
 import { z } from "zod";
 
@@ -26,7 +26,8 @@ router.get("/grid", requireAuth, validateQuery(gridQuerySchema), async (req, res
       classroomId: query.classroomId,
       includePuntual: query.includePuntual !== "false",
     });
-    ok(res, grid, 200);
+    // Service cachea 20s con SWR (CACHE_POLICIES.grid): max-age corto acorde.
+    okCached(res, grid, 20);
   } catch (e) {
     next(e);
   }

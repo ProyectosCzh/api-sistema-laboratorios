@@ -1,4 +1,5 @@
 import { prisma } from "../lib/prisma";
+import { cache, CACHE_KEYS, CACHE_POLICIES } from "../cache";
 import { ApiErrors } from "../utils/errors";
 import type {
   AvailabilityGridCell,
@@ -152,8 +153,30 @@ export async function getClassroomState(
 /**
  * Grilla semanal (Tabla Semanal de Disponibilidad): matriz días × turnos
  * por aula con el bloque o reserva que ocupa cada celda.
+ * Cacheada 20s con SWR 40s y tag `grid:{semesterId}` (se invalida en cada
+ * escritura de schedules/reservations vía invalidateOccupancy).
  */
-export async function getAvailabilityGrid(params: {
+export function getAvailabilityGrid(params: {
+  semesterId: string;
+  classroomId?: string;
+  includePuntual?: boolean;
+}): Promise<{
+  semester: { id: string; name: string; workingDays: number[]; startDate: string; endDate: string };
+  timeSlots: Array<{ id: string; label: string; startTime: string; endTime: string; order: number }>;
+  classrooms: AvailabilityGridClassroom[];
+}> {
+  const filters = {
+    classroomId: params.classroomId,
+    includePuntual: params.includePuntual === false ? false : undefined,
+  };
+  return cache.getOrSet(
+    CACHE_KEYS.grid(params.semesterId, filters),
+    () => loadAvailabilityGrid(params),
+    { ...CACHE_POLICIES.grid, tags: [`grid:${params.semesterId}`] }
+  );
+}
+
+async function loadAvailabilityGrid(params: {
   semesterId: string;
   classroomId?: string;
   includePuntual?: boolean;

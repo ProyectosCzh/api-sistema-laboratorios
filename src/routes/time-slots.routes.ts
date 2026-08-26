@@ -1,7 +1,7 @@
 import { Router } from "express";
 import { requireAuth, requireRole } from "../middleware/auth";
 import { validateBody, validateParams, getBody, getParams } from "../middleware/validate";
-import { ok, noContent } from "../utils/responses";
+import { ok, noContent, okCached } from "../utils/responses";
 import * as timeSlotService from "../services/timeSlot.service";
 import type { CreateTimeSlotInput, UpdateTimeSlotInput } from "../validators/timeSlot.schema";
 import * as validators from "../validators/timeSlot.schema";
@@ -11,7 +11,8 @@ const router = Router();
 router.get("/", requireAuth, async (_req, res, next) => {
   try {
     const timeSlots = await timeSlotService.listTimeSlots();
-    ok(res, timeSlots, 200);
+    // Service cachea 10min (CACHE_POLICIES.timeSlots): private max-age acorde.
+    okCached(res, timeSlots, 10 * 60);
   } catch (e) {
     next(e);
   }

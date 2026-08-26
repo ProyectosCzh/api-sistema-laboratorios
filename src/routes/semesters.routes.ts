@@ -1,7 +1,7 @@
 import { Router } from "express";
 import { requireAuth, requireRole } from "../middleware/auth";
 import { validateBody, validateParams, getParams, validateQuery, getQuery } from "../middleware/validate";
-import { ok, paginated, noContent } from "../utils/responses";
+import { ok, noContent, paginatedCached } from "../utils/responses";
 import * as semesterService from "../services/semester.service";
 import type { ListSemestersQuery, CreateSemesterInput, UpdateSemesterInput } from "../validators/semester.schema";
 import * as validators from "../validators/semester.schema";
@@ -12,7 +12,8 @@ router.get("/", requireAuth, validateQuery(validators.listSemestersQuerySchema),
   try {
     const query = getQuery<ListSemestersQuery>(req);
     const result = await semesterService.listSemesters(query);
-    paginated(res, result.items, result.meta);
+    // Service cachea 5min (CACHE_POLICIES.semesters): private max-age acorde.
+    paginatedCached(res, result.items, result.meta, 5 * 60);
   } catch (e) {
     next(e);
   }
