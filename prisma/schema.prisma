@@ -140,6 +140,12 @@ model Subject {
 
 /// Bloque academico de la planilla semanal: una materia (con docente opcional)
 /// ocupa un aula en un dia y turno durante todo el semestre.
+///
+/// IMPORTANTE: Schedule y Reservation compiten por la misma "celda" física
+/// (classroom + timeSlot + day/date). NO existe constraint cruzado en la DB
+/// entre ambos modelos. Siempre validar via slotAvailability.service antes
+/// de crear/modificar cualquiera de los dos. La DB solo previene duplicados
+/// dentro del mismo modelo.
 model Schedule {
   id            String   @id @default(cuid())
   classroomId   String
@@ -169,6 +175,13 @@ model Schedule {
 /// Reserva operativa registrada por el personal.
 /// RECURRENTE: ocupa la celda dayOfWeek + turno durante todo el semestre.
 /// PUNTUAL: ocupa solo la fecha indicada (date) en el turno indicado.
+///
+/// IMPORTANTE: Reservation y Schedule compiten por la misma "celda" física
+/// (classroom + timeSlot + day/date). NO existe constraint cruzado en la DB.
+/// Los índices parciales solo previenen duplicados entre Reservationes:
+///   RECURRENTE: (classroomId, semesterId, timeSlotId, dayOfWeek)
+///   PUNTUAL:    (classroomId, semesterId, timeSlotId, date)
+/// Siempre validar via slotAvailability.service antes de crear/modificar.
 model Reservation {
   id            String            @id @default(cuid())
   classroomId   String

@@ -9,17 +9,15 @@ function toBody(err: ApiError) {
 }
 
 function mapUniqueTarget(target: string[]): ApiError | null {
-  const field = target.join(",");
-  if (field.includes("email")) return ApiErrors.emailInUse();
-  if (field.includes("code")) return ApiErrors.classroomCodeInUse();
-  if (field.includes("order")) return ApiErrors.timeSlotOrderInUse();
-  if (
-    field.includes("classroomId") &&
-    field.includes("semesterId") &&
-    field.includes("dayOfWeek") &&
-    field.includes("timeSlotId")
-  ) {
-    return ApiErrors.reservationConflict();
+  const has = (col: string) => target.includes(col);
+  if (has("email")) return ApiErrors.emailInUse();
+  if (has("code") && !has("classroomId")) return ApiErrors.classroomCodeInUse();
+  if (has("order")) return ApiErrors.timeSlotOrderInUse();
+  const isRecurring = has("classroomId") && has("semesterId") && has("timeSlotId") && has("dayOfWeek") && !has("date");
+  const isPunctual = has("classroomId") && has("semesterId") && has("timeSlotId") && has("date") && !has("dayOfWeek");
+  if (isRecurring || isPunctual) return ApiErrors.reservationConflict();
+  if (has("classroomId") && has("semesterId") && has("dayOfWeek") && has("timeSlotId") && !has("date")) {
+    return ApiErrors.conflict();
   }
   return null;
 }

@@ -234,6 +234,7 @@ export async function updateProfile(userId: string, data: UpdateProfileInput): P
   if (data.email !== undefined) updateData.email = data.email.toLowerCase();
 
   const user = await prisma.user.update({ where: { id: userId }, data: updateData });
+  cache.del(CACHE_KEYS.user(userId));
   return toPublicUser(user);
 }
 
