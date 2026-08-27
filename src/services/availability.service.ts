@@ -22,6 +22,10 @@ function parseHHmm(value: string): number {
 }
 
 async function detectCurrentTimeSlot() {
+  // NOTE: Uses local time (getHours / getMinutes) intentionally so that
+  // "current time slot" reflects the server's locale rather than UTC.
+  // The rest of the codebase normalises calendar dates via UTC, but time-slot
+  // detection is inherently locale-dependent for a wall-clock experience.
   const now = new Date();
   const minutes = now.getHours() * 60 + now.getMinutes();
 

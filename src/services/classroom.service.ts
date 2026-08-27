@@ -83,7 +83,45 @@ export async function updateClassroom(
     capacity?: number | null;
     location?: string | null;
   }
-): Promise<Classroom> {
+): Promise<{ classroom: Classroom; warnings: string[] }> {
+  const warnings: string[] = [];
+
+  if (
+    data.status !== undefined &&
+    (data.status === "INACTIVA" || data.status === "FUERA_SERVICIO")
+  ) {
+    const activeSemester = await prisma.semester.findFirst({
+      where: { isActive: true },
+      select: { id: true, name: true },
+    });
+
+    if (activeSemester) {
+      const [scheduleCount, reservationCount] = await Promise.all([
+        prisma.schedule.count({
+          where: { classroomId: id, semesterId: activeSemester.id },
+        }),
+        prisma.reservation.count({
+          where: {
+            classroomId: id,
+            semesterId: activeSemester.id,
+            status: { notIn: ["CANCELADA"] },
+          },
+        }),
+      ]);
+
+      if (scheduleCount > 0) {
+        warnings.push(
+          `El aula tiene ${scheduleCount} horario(s) activo(s) en el semestre "${activeSemester.name}"`
+        );
+      }
+      if (reservationCount > 0) {
+        warnings.push(
+          `El aula tiene ${reservationCount} reserva(s) activa(s) en el semestre "${activeSemester.name}"`
+        );
+      }
+    }
+  }
+
   const updateData: Partial<typeof data> = {};
   if (data.code !== undefined) updateData.code = data.code.toUpperCase().trim();
   if (data.name !== undefined) updateData.name = data.name.trim();
@@ -95,13 +133,47 @@ export async function updateClassroom(
   const classroom = await prisma.classroom.update({ where: { id }, data: updateData });
   invalidateCatalog();
   invalidateStats();
-  return toClassroom(classroom);
+  return { classroom: toClassroom(classroom), warnings };
 }
 
-export async function deleteClassroom(id: string): Promise<void> {
+export async function deleteClassroom(id: string): Promise<{ warnings: string[] }> {
+  const warnings: string[] = [];
+
+  const activeSemester = await prisma.semester.findFirst({
+    where: { isActive: true },
+    select: { id: true, name: true },
+  });
+
+  if (activeSemester) {
+    const [scheduleCount, reservationCount] = await Promise.all([
+      prisma.schedule.count({
+        where: { classroomId: id, semesterId: activeSemester.id },
+      }),
+      prisma.reservation.count({
+        where: {
+          classroomId: id,
+          semesterId: activeSemester.id,
+          status: { notIn: ["CANCELADA"] },
+        },
+      }),
+    ]);
+
+    if (scheduleCount > 0) {
+      warnings.push(
+        `El aula tiene ${scheduleCount} horario(s) activo(s) en el semestre "${activeSemester.name}"`
+      );
+    }
+    if (reservationCount > 0) {
+      warnings.push(
+        `El aula tiene ${reservationCount} reserva(s) activa(s) en el semestre "${activeSemester.name}"`
+      );
+    }
+  }
+
   await prisma.classroom.update({ where: { id }, data: { status: "INACTIVA" } });
   invalidateCatalog();
   invalidateStats();
+  return { warnings };
 }
 
 type ClassroomRecord = {

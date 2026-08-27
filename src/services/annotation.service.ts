@@ -56,14 +56,15 @@ export async function getAnnotation(id: string): Promise<Annotation> {
 }
 
 export async function createAnnotation(classroomId: string, content: string, userId: string): Promise<Annotation> {
-  const classroom = await prisma.classroom.findUnique({ where: { id: classroomId } });
-  if (!classroom) throw ApiErrors.notFound("Aula no encontrada");
-
-  const annotation = await prisma.annotation.create({
-    data: { classroomId, content, userId },
-    include: { user: { select: { id: true, name: true } } },
+  return prisma.$transaction(async (tx) => {
+    const classroom = await tx.classroom.findUnique({ where: { id: classroomId } });
+    if (!classroom) throw ApiErrors.notFound("Aula no encontrada");
+    const annotation = await tx.annotation.create({
+      data: { classroomId, userId, content },
+      include: { user: { select: { id: true, name: true } } },
+    });
+    return toAnnotation(annotation);
   });
-  return toAnnotation(annotation);
 }
 
 export async function updateAnnotation(id: string, data: UpdateAnnotationInput, userId: string, userRole: "ENCARGADO" | "AYUDANTE"): Promise<Annotation> {

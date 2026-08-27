@@ -4,6 +4,7 @@ import { prisma } from "../lib/prisma";
 import { cache } from "../cache";
 import { CACHE_KEYS, CACHE_POLICIES } from "../cache/policies";
 import { ApiErrors } from "../utils/errors";
+import { uniqueViolationColumns } from "../utils/dbErrors";
 import { buildMeta, buildPagination, PaginatedResult } from "../utils/pagination";
 import { toPublicUser } from "../utils/serializers";
 import { revokeAllSessionsForUser } from "./auth.service";
@@ -79,7 +80,14 @@ export async function updateUser(
   if (data.email) {
     updateData.email = data.email.toLowerCase();
   }
-  const user = await prisma.user.update({ where: { id }, data: updateData });
+  let user;
+  try {
+    user = await prisma.user.update({ where: { id }, data: updateData });
+  } catch (e) {
+    const violated = uniqueViolationColumns(e);
+    if (violated?.includes("email")) throw ApiErrors.emailInUse();
+    throw e;
+  }
   cache.del(CACHE_KEYS.user(id));
   if (data.role !== undefined || data.active !== undefined) {
     await revokeAllSessionsForUser(id, opts?.keepSessionId);
@@ -90,16 +98,25 @@ export async function updateUser(
 export async function deleteUser(id: string, currentUserId: string): Promise<void> {
   if (id === currentUserId) throw ApiErrors.cannotDeleteSelf();
 
-  const [schedulesCount, annotationsCount, maintenanceCount] = await Promise.all([
+  const [schedulesCount, annotationsCount, maintenanceCount, reservationsRequestedCount, reservationsResolvedCount] = await Promise.all([
     prisma.schedule.count({ where: { assignedById: id } }),
     prisma.annotation.count({ where: { userId: id } }),
     prisma.maintenanceLog.count({ where: { createdById: id } }),
+    prisma.reservation.count({ where: { requestedById: id } }),
+    prisma.reservation.count({ where: { resolvedById: id } }),
   ]);
 
-  if (schedulesCount > 0 || annotationsCount > 0 || maintenanceCount > 0) {
+  if (
+    schedulesCount > 0 ||
+    annotationsCount > 0 ||
+    maintenanceCount > 0 ||
+    reservationsRequestedCount > 0 ||
+    reservationsResolvedCount > 0
+  ) {
     throw ApiErrors.userHasDependencies();
   }
 
+  await revokeAllSessionsForUser(id);
   await prisma.user.delete({ where: { id } });
   cache.del(CACHE_KEYS.user(id));
 }

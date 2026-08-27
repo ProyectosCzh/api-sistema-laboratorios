@@ -136,6 +136,13 @@ export async function assertNoTeacherConflict(
  * Disponibilidad de una celda semanal completa (bloques académicos y
  * reservas recurrentes). También detecta el choque inverso: reservas
  * puntuales dentro del semestre que caigan en ese mismo día y turno.
+ *
+ * SINGLE SOURCE OF TRUTH para validación de celdas:
+ * - Verifica contra Schedule (bloque académico existente)
+ * - Verifica contra Reservation recurrente activa en la misma celda
+ * - Verifica contra Reservation puntual activa en el mismo día+turno
+ * - NO existe constraint cruzado Schedule↔Reservation en la DB;
+ *   esta función es la ÚNICA barrera de integridad entre ambos modelos.
  */
 export async function assertRecurringSlotAvailable(
   tx: TxClient,
@@ -159,6 +166,9 @@ export async function assertRecurringSlotAvailable(
     select: { startDate: true, endDate: true },
   });
 
+  // PERF: O(n) scan of punctual reservations per semester. Consider adding a
+  // composite index on (classroomId, semesterId, timeSlotId, status) if this
+  // becomes a bottleneck.
   const punctuals = await tx.reservation.findMany({
     where: {
       classroomId: slot.classroomId,
