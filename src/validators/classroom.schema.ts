@@ -34,3 +34,8 @@ export const updateClassroomSchema = z.object({
 export type ListClassroomsQuery = z.infer<typeof listClassroomsQuerySchema>;
 export type CreateClassroomInput = z.infer<typeof createClassroomSchema>;
 export type UpdateClassroomInput = z.infer<typeof updateClassroomSchema>;
+
+export const stateQuerySchema = z.object({
+  date: z.coerce.date().optional(),
+  timeSlotId: z.string().min(1).optional(),
+});

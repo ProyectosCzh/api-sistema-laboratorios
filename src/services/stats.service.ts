@@ -53,12 +53,47 @@ async function getOccupancyData(activeSemesterId: string | undefined, totalSlots
     return classrooms.map(c => ({ classroom: c, occupiedSlots: 0, totalSlots, percentage: 0 }));
   }
 
-  const grouped = await prisma.schedule.groupBy({
-    by: ["classroomId"],
-    where: { semesterId: activeSemesterId },
-    _count: { _all: true },
-  });
-  const occupiedByClassroom = new Map(grouped.map(g => [g.classroomId, g._count._all]));
+  const [scheduleCells, reservations] = await Promise.all([
+    prisma.schedule.groupBy({
+      by: ["classroomId", "dayOfWeek", "timeSlotId"],
+      where: { semesterId: activeSemesterId },
+    }),
+    prisma.reservation.findMany({
+      where: {
+        semesterId: activeSemesterId,
+        status: { not: "CANCELADA" },
+      },
+      select: {
+        classroomId: true,
+        dayOfWeek: true,
+        timeSlotId: true,
+        type: true,
+        date: true,
+      },
+    }),
+  ]);
+
+  const occupiedCells = new Set<string>();
+
+  for (const cell of scheduleCells) {
+    occupiedCells.add(`${cell.classroomId}:${cell.dayOfWeek}:${cell.timeSlotId}`);
+  }
+
+  for (const r of reservations) {
+    let dayOfWeek = r.dayOfWeek;
+    if (dayOfWeek === null && r.date !== null) {
+      dayOfWeek = r.date.getUTCDay();
+    }
+    if (dayOfWeek !== null) {
+      occupiedCells.add(`${r.classroomId}:${dayOfWeek}:${r.timeSlotId}`);
+    }
+  }
+
+  const occupiedByClassroom = new Map<string, number>();
+  for (const key of occupiedCells) {
+    const classroomId = key.split(":")[0]!;
+    occupiedByClassroom.set(classroomId, (occupiedByClassroom.get(classroomId) || 0) + 1);
+  }
 
   return classrooms.map(c => {
     const occupied = occupiedByClassroom.get(c.id) || 0;

@@ -3,13 +3,7 @@ import { requireAuth } from "../middleware/auth";
 import { validateQuery, getQuery } from "../middleware/validate";
 import { okCached } from "../utils/responses";
 import * as availabilityService from "../services/availability.service";
-import { z } from "zod";
-
-const gridQuerySchema = z.object({
-  semesterId: z.string().min(1),
-  classroomId: z.string().min(1).optional(),
-  includePuntual: z.enum(["true", "false"]).optional(),
-});
+import { gridQuerySchema } from "../validators/shared.schema";
 
 const router = Router();
 

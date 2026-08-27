@@ -178,6 +178,7 @@ export interface MaintenanceLog {
   status: MaintenanceStatus;
   createdById: string;
   createdAt: string;
+  updatedAt: string;
 }
 
 export interface StatsOverview {
@@ -199,12 +200,7 @@ export interface AuthResponse {
   user: User;
 }
 
-export interface PaginationMeta {
-  page: number;
-  pageSize: number;
-  total: number;
-  totalPages: number;
-}
+export type { PaginationMeta } from "../utils/pagination";
 
 export interface HealthStatus {
   status: "ok";

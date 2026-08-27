@@ -6,6 +6,7 @@ import { env } from "../config/env";
 import { cache } from "../cache";
 import { CACHE_KEYS } from "../cache/policies";
 import { ApiErrors } from "../utils/errors";
+import { uniqueViolationColumns } from "../utils/dbErrors";
 import { toPublicUser } from "../utils/serializers";
 import type { User } from "../types";
 import type { UpdateProfileInput, ChangePasswordInput } from "../validators/auth.schema";
@@ -233,7 +234,15 @@ export async function updateProfile(userId: string, data: UpdateProfileInput): P
   if (data.name !== undefined) updateData.name = data.name.trim();
   if (data.email !== undefined) updateData.email = data.email.toLowerCase();
 
-  const user = await prisma.user.update({ where: { id: userId }, data: updateData });
+  let user;
+  try {
+    user = await prisma.user.update({ where: { id: userId }, data: updateData });
+  } catch (e) {
+    const violated = uniqueViolationColumns(e);
+    if (violated?.includes("email")) throw ApiErrors.emailInUse();
+    throw e;
+  }
+  cache.del(CACHE_KEYS.user(userId));
   return toPublicUser(user);
 }
 

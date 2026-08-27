@@ -1,6 +1,6 @@
 import { Router } from "express";
 import { requireAuth } from "../middleware/auth";
-import { validateBody, validateParams, validateQuery, getQuery, getParams } from "../middleware/validate";
+import { validateBody, validateParams, validateQuery, getQuery, getParams, getBody } from "../middleware/validate";
 import { ok, noContent } from "../utils/responses";
 import * as scheduleService from "../services/schedule.service";
 import type { ListSchedulesQuery, CreateScheduleInput, UpdateScheduleInput } from "../validators/schedule.schema";
@@ -58,9 +58,5 @@ router.delete("/:id", requireAuth, validateParams(validators.idParamsSchema), as
     next(e);
   }
 });
-
-function getBody<T>(req: import("express").Request): T {
-  return req.validated?.body as T;
-}
 
 export default router;

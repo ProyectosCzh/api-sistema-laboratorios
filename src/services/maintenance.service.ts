@@ -101,9 +101,20 @@ async function syncClassroomAvailability(tx: Prisma.TransactionClient, classroom
   ]);
   if (!classroom) return;
 
+  // INACTIVA / FUERA_SERVICIO are manual statuses managed exclusively
+  // by the admin via updateClassroom. Maintenance sync must never override
+  // them — the admin intentionally set those states.
+  if (classroom.status === "INACTIVA" || classroom.status === "FUERA_SERVICIO") {
+    return;
+  }
+
+  // ACTIVA → EN_MANTENIMIENTO: open maintenance exists
   if (openCount > 0 && classroom.status === "ACTIVA") {
     await tx.classroom.update({ where: { id: classroomId }, data: { status: "EN_MANTENIMIENTO" } });
+    return;
   }
+
+  // EN_MANTENIMIENTO → ACTIVA: all maintenance resolved
   if (openCount === 0 && classroom.status === "EN_MANTENIMIENTO") {
     await tx.classroom.update({ where: { id: classroomId }, data: { status: "ACTIVA" } });
   }
@@ -118,6 +129,7 @@ function toMaintenance(m: {
   status: MaintenanceStatus;
   createdById: string;
   createdAt: Date;
+  updatedAt: Date;
 }): MaintenanceLog {
   return {
     id: m.id,
@@ -128,5 +140,6 @@ function toMaintenance(m: {
     status: m.status,
     createdById: m.createdById,
     createdAt: m.createdAt.toISOString(),
+    updatedAt: m.updatedAt.toISOString(),
   };
 }

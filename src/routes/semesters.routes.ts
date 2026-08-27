@@ -1,6 +1,6 @@
 import { Router } from "express";
 import { requireAuth, requireRole } from "../middleware/auth";
-import { validateBody, validateParams, getParams, validateQuery, getQuery } from "../middleware/validate";
+import { validateBody, validateParams, getParams, validateQuery, getQuery, getBody } from "../middleware/validate";
 import { ok, noContent, paginatedCached } from "../utils/responses";
 import * as semesterService from "../services/semester.service";
 import type { ListSemestersQuery, CreateSemesterInput, UpdateSemesterInput } from "../validators/semester.schema";
@@ -69,9 +69,5 @@ router.post("/:id/activate", requireAuth, requireRole("ENCARGADO"), validatePara
     next(e);
   }
 });
-
-function getBody<T>(req: import("express").Request): T {
-  return req.validated?.body as T;
-}
 
 export default router;

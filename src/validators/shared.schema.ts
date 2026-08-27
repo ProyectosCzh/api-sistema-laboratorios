@@ -1,6 +1,8 @@
 import { z } from "zod";
 
-export const idParamsSchema = z.object({ id: z.string().min(1) });
+export const idParamsSchema = z.object({
+  id: z.string().min(1).regex(/^c[a-z0-9]{24,}$/, "ID inválido"),
+});
 
 export const paginationSchema = z.object({
   page: z.coerce.number().int().min(1).default(1),
@@ -28,3 +30,9 @@ export const dayOfWeekSchema = z.coerce.number().int().min(1).max(6);
 export const timeStringSchema = z
   .string()
   .regex(/^([01]\d|2[0-3]):[0-5]\d$/, "Debe tener formato HH:mm (24h)");
+
+export const gridQuerySchema = z.object({
+  semesterId: z.string().min(1),
+  classroomId: z.string().min(1).optional(),
+  includePuntual: z.enum(["true", "false"]).optional(),
+});

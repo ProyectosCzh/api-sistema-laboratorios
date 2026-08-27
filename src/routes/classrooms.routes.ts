@@ -1,18 +1,13 @@
 import { Router } from "express";
-import { z } from "zod";
 import { requireAuth, requireRole } from "../middleware/auth";
-import { validateBody, validateParams, validateQuery, getQuery, getParams } from "../middleware/validate";
-import { ok, noContent, paginatedCached } from "../utils/responses";
+import { validateBody, validateParams, validateQuery, getQuery, getParams, getBody } from "../middleware/validate";
+import { ok, paginatedCached } from "../utils/responses";
 import * as classroomService from "../services/classroom.service";
 import * as availabilityService from "../services/availability.service";
 import type { ListClassroomsQuery, CreateClassroomInput, UpdateClassroomInput } from "../validators/classroom.schema";
 import type { ListClassroomsOptions } from "../services/classroom.service";
 import * as validators from "../validators/classroom.schema";
-
-const stateQuerySchema = z.object({
-  date: z.coerce.date().optional(),
-  timeSlotId: z.string().min(1).optional(),
-});
+import { stateQuerySchema } from "../validators/classroom.schema";
 
 const router = Router();
 
@@ -74,8 +69,8 @@ router.patch("/:id", requireAuth, requireRole("ENCARGADO"), validateParams(valid
   try {
     const { id } = getParams(req);
     const body = getBody<UpdateClassroomInput>(req);
-    const classroom = await classroomService.updateClassroom(id, body);
-    ok(res, { classroom }, 200);
+    const { classroom, warnings } = await classroomService.updateClassroom(id, body);
+    ok(res, { classroom, warnings }, 200);
   } catch (e) {
     next(e);
   }
@@ -84,15 +79,11 @@ router.patch("/:id", requireAuth, requireRole("ENCARGADO"), validateParams(valid
 router.delete("/:id", requireAuth, requireRole("ENCARGADO"), validateParams(validators.idParamsSchema), async (req, res, next) => {
   try {
     const { id } = getParams(req);
-    await classroomService.deleteClassroom(id);
-    noContent(res);
+    const { warnings } = await classroomService.deleteClassroom(id);
+    ok(res, { warnings }, 200);
   } catch (e) {
     next(e);
   }
 });
-
-function getBody<T>(req: import("express").Request): T {
-  return req.validated?.body as T;
-}
 
 export default router;
