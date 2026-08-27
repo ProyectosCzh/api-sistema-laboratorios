@@ -155,7 +155,7 @@ model Schedule {
   dayOfWeek     Int
   timeSlotId    String
   note          String?
-  assignedById  String
+  assignedById  String // Records creator only; full audit trail requires a separate model (future)
   createdAt     DateTime @default(now())
   updatedAt     DateTime @updatedAt
 
@@ -193,7 +193,7 @@ model Reservation {
   status        ReservationStatus @default(PENDIENTE)
   note          String?
   requestedById String
-  resolvedById  String?
+  resolvedById  String? // Last actor (approver or canceller), not full history
   createdAt     DateTime          @default(now())
   updatedAt     DateTime          @updatedAt
 
@@ -229,6 +229,7 @@ model MaintenanceLog {
   status      MaintenanceStatus @default(REPORTADO)
   createdById String
   createdAt   DateTime          @default(now())
+  updatedAt   DateTime          @updatedAt
   classroom   Classroom         @relation(fields: [classroomId], references: [id], onDelete: Cascade)
   createdBy   User              @relation(fields: [createdById], references: [id])
 
