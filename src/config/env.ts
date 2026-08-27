@@ -13,7 +13,6 @@ export const env = {
   isProd: NODE_ENV === "production",
   databaseUrl: required("DATABASE_URL"),
   jwtSecret: required("JWT_SECRET"),
-  jwtExpiresIn: process.env.JWT_EXPIRES_IN ?? "12h",
   /** TTL del access token de sesión (claims {sub, role, sid}). */
   accessTokenTtl: process.env.ACCESS_TOKEN_TTL ?? "15m",
   /** Vida útil del refresh token / Session en días. */
@@ -22,7 +21,7 @@ export const env = {
   cookieSecure: (process.env.COOKIE_SECURE ?? "false") === "true",
   trustProxy: (process.env.TRUST_PROXY ?? "false") === "true",
   /** Documentación Scalar/OpenAPI desactivable en producción. */
-  docsEnabled: process.env.DOCS_ENABLED !== "false",
+  docsEnabled: process.env.DOCS_ENABLED === "true",
   /** Origen del BFF Astro; si está seteado, CORS se restringe a ese valor. */
   webOrigin: process.env.WEB_ORIGIN,
   port: Number(process.env.PORT ?? 3001),

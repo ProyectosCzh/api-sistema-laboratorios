@@ -1,6 +1,6 @@
 import { Router } from "express";
 import { requireAuth, requireRole } from "../middleware/auth";
-import { validateBody, validateParams, validateQuery, getQuery, getParams } from "../middleware/validate";
+import { validateBody, validateParams, validateQuery, getQuery, getParams, getBody } from "../middleware/validate";
 import { ok, noContent, paginatedCached } from "../utils/responses";
 import * as teacherService from "../services/teacher.service";
 import type { ListTeachersQuery, CreateTeacherInput, UpdateTeacherInput } from "../validators/teacher.schema";
@@ -67,9 +67,5 @@ router.delete("/:id", requireAuth, requireRole("ENCARGADO"), validateParams(vali
     next(e);
   }
 });
-
-function getBody<T>(req: import("express").Request): T {
-  return req.validated?.body as T;
-}
 
 export default router;

@@ -18,6 +18,12 @@ import statsRoutes from "./stats.routes";
 
 const router = Router();
 
+// Authorization patterns:
+// - Pattern A (route-level): Resources that only ENCARGADO can modify → requireRole("ENCARGADO") middleware
+//   Applied to: users, classrooms (write), subjects (write), teachers (write), semesters (write), maintenance (update/delete), reservations (delete)
+// - Pattern B (service-level): Resources where AYUDANTE can create/modify their own records → service enforces ownership
+//   Applied to: schedules, reservations (create/update/status), annotations
+
 router.use(createGlobalLimiter());
 
 router.use("/auth", authRoutes);

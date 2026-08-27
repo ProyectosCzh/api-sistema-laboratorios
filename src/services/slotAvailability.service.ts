@@ -166,6 +166,9 @@ export async function assertRecurringSlotAvailable(
     select: { startDate: true, endDate: true },
   });
 
+  // PERF: O(n) scan of punctual reservations per semester. Consider adding a
+  // composite index on (classroomId, semesterId, timeSlotId, status) if this
+  // becomes a bottleneck.
   const punctuals = await tx.reservation.findMany({
     where: {
       classroomId: slot.classroomId,

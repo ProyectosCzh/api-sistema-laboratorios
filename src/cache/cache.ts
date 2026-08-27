@@ -34,7 +34,7 @@ const DEFAULT_TTL_MS = 60_000;
  * Interfaz estrecha pensada para swap futuro a Redis: solo operaciones
  * por clave + invalidación por tag/prefijo.
  */
-export function createCache(): Cache {
+export function createCache(maxSize = 10_000): Cache {
   const store = new Map<string, Entry>();
   const inflight = new Map<string, Promise<unknown>>();
   let hits = 0;
@@ -53,6 +53,7 @@ export function createCache(): Cache {
       swrUntil: now + ttlMs + Math.max(opts.staleWhileRevalidateMs ?? 0, 0),
       tags: opts.tags ?? [],
     });
+    evict();
   }
 
   async function loadSingleFlight<T>(key: string, fn: () => Promise<T>, opts: CacheSetOptions): Promise<T> {
@@ -71,6 +72,25 @@ export function createCache(): Cache {
     inflight.set(key, promise);
     return promise;
   }
+
+  function evict(): void {
+    if (store.size <= maxSize) return;
+    const toRemove = store.size - maxSize;
+    let removed = 0;
+    for (const key of store.keys()) {
+      if (removed >= toRemove) break;
+      store.delete(key);
+      removed++;
+    }
+  }
+
+  const sweepInterval = setInterval(() => {
+    const now = Date.now();
+    for (const [key, entry] of store) {
+      if (entry.swrUntil <= now) store.delete(key);
+    }
+  }, 60_000);
+  if (sweepInterval.unref) sweepInterval.unref();
 
   return {
     get<T>(key: string): T | undefined {

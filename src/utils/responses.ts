@@ -2,6 +2,7 @@ import { Response } from "express";
 import type { PaginationMeta } from "./pagination";
 
 export function ok<T>(res: Response, data: T, status = 200): Response {
+  res.setHeader('Cache-Control', 'no-store');
   return res.status(status).json({ data });
 }
 
@@ -10,6 +11,7 @@ export function paginated<T>(res: Response, data: T[], meta: PaginationMeta): Re
 }
 
 export function noContent(res: Response): Response {
+  res.setHeader('Cache-Control', 'no-store');
   return res.status(204).send();
 }
 

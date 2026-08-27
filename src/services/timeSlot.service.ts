@@ -37,8 +37,16 @@ export async function createTimeSlot(data: CreateTimeSlotInput): Promise<TimeSlo
 }
 
 export async function updateTimeSlot(id: string, data: UpdateTimeSlotInput): Promise<TimeSlot> {
-  const existing = await prisma.timeSlot.findUnique({ where: { id }, select: { id: true } });
+  const existing = await prisma.timeSlot.findUnique({ where: { id }, select: { id: true, startTime: true, endTime: true } });
   if (!existing) throw ApiErrors.notFound("Turno no encontrado");
+
+  const finalStartTime = data.startTime ?? existing.startTime;
+  const finalEndTime = data.endTime ?? existing.endTime;
+  if (finalStartTime >= finalEndTime) {
+    throw ApiErrors.validation([
+      { field: "startTime", message: "La hora de inicio debe ser anterior a la hora de fin" },
+    ]);
+  }
 
   const updateData: { label?: string; startTime?: string; endTime?: string; order?: number } = {};
   if (data.label !== undefined) updateData.label = data.label;
@@ -62,7 +70,8 @@ export async function deleteTimeSlot(id: string): Promise<void> {
   if (!existing) throw ApiErrors.notFound("Turno no encontrado");
 
   const schedulesCount = await prisma.schedule.count({ where: { timeSlotId: id } });
-  if (schedulesCount > 0) throw ApiErrors.timeSlotInUse();
+  const reservationsCount = await prisma.reservation.count({ where: { timeSlotId: id } });
+  if (schedulesCount > 0 || reservationsCount > 0) throw ApiErrors.timeSlotInUse();
 
   await prisma.timeSlot.delete({ where: { id } });
   invalidateCatalog();

@@ -65,9 +65,18 @@ export async function updateSemester(
   id: string,
   data: { name?: string; startDate?: Date; endDate?: Date; workingDays?: number[] }
 ): Promise<Semester> {
-  if (data.startDate && data.endDate && data.endDate <= data.startDate) {
-    throw ApiErrors.validation([{ field: "endDate", message: "endDate debe ser posterior a startDate" }]);
+  const existing = await prisma.semester.findUnique({ where: { id } });
+  if (!existing) throw ApiErrors.notFound("Semestre no encontrado");
+
+  const startDate = data.startDate ?? existing.startDate;
+  const endDate = data.endDate ?? existing.endDate;
+
+  if (endDate <= startDate) {
+    throw ApiErrors.validation([
+      { field: "endDate", message: "La fecha de fin debe ser posterior a la fecha de inicio" },
+    ]);
   }
+
   const updateData = { ...data };
   if (data.workingDays !== undefined) updateData.workingDays = normalizeWorkingDays(data.workingDays);
   const semester = await prisma.semester.update({ where: { id }, data: updateData });

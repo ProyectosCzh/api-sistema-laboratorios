@@ -48,7 +48,7 @@ export function errorHandler(err: Error, req: Request, res: Response, _next: Nex
       return res.status(404).json(toBody(ApiErrors.notFound()));
     }
     if (err.code === "P2003") {
-      return res.status(409).json(toBody(ApiErrors.conflict()));
+      return res.status(400).json(toBody(ApiErrors.conflict()));
     }
   }
 
